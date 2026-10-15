@@ -1,0 +1,135 @@
+[
+  {
+    "verdict": "confirmed",
+    "fingerprint": "src/git.rs:git_command:nested-submodule-unhardened-child",
+    "title": "Submodule diff runs repository diff.external despite --no-ext-diff",
+    "description": "git_command puts --no-ext-diff and --no-textconv only on the top-level git process. When the superproject sets diff.submodule=diff, Git 2.43 spawns a second git diff inside a populated submodule. That child argv does not include --no-ext-diff, so the submodule diff.external runs. On the viewer's git older than 2.40 path, which omits --attr-source, the same child also runs diff.<driver>.textconv. The operator who views that diff runs the repository-chosen command.",
+    "root_cause": "base_git_command and git_command harden a single process. --no-ext-diff and --no-textconv are command flags, and Git does not forward them to the inline submodule diff it spawns for diff.submodule=diff. The viewer never passes -c diff.submodule=short, --ignore-submodules, or a diff.external override, so the child honors the submodule's own diff config. Inherited -c values (core.fsmonitor=false and core.hooksPath) and GIT_ATTR_SOURCE do not disable diff.external.",
+    "intended_behavior": "Queries against an untrusted repository must refuse diff and textconv programs, including a content diff Git runs inside a submodule while answering the viewer's diff. The shared git command builder is the place that control is supposed to live.",
+    "trace": [
+      {
+        "kind": "entrypoint",
+        "file": "src/controller/mod.rs",
+        "line": 3713,
+        "scope": "Controller::dispatch_render",
+        "description": "Git-status mode on a selected directory forces a working-tree Diff with directory_diff set, which issues a pathspec covering that directory."
+      },
+      {
+        "kind": "propagation",
+        "file": "src/controller/mod.rs",
+        "line": 1220,
+        "scope": "Controller::spawn_worker",
+        "description": "The render worker calls GitService::diff_directory. An empty relative path diffs the whole tree."
+      },
+      {
+        "kind": "propagation",
+        "file": "src/app.rs",
+        "line": 505,
+        "scope": "LiveGit::diff_directory",
+        "description": "The live git service forwards the directory diff to git::diff_directory against the resolved repository root."
+      },
+      {
+        "kind": "propagation",
+        "file": "src/git.rs",
+        "line": 309,
+        "scope": "diff_directory",
+        "description": "The diff argv is diff --no-ext-diff --no-textconv --no-color <rev> -- and is passed to git_command. File diffs use the same flags."
+      },
+      {
+        "kind": "sink",
+        "file": "src/git.rs",
+        "line": 545,
+        "scope": "git_command",
+        "description": "git_command adds only fsmonitor and hooksPath overrides, optional --attr-source, filter overrides, and the caller args. It does not force diff.submodule=short, so a superproject diff.submodule=diff spawns the unhardened submodule diff."
+      }
+    ],
+    "evidence": [
+      {
+        "file": "src/git.rs",
+        "line": 252,
+        "description": "File diff passes --no-ext-diff and --no-textconv only as arguments of this git process."
+      },
+      {
+        "file": "src/git.rs",
+        "line": 309,
+        "description": "Directory diff uses those same flags and is the whole-tree argv that was executed locally."
+      },
+      {
+        "file": "src/git.rs",
+        "line": 530,
+        "description": "base_git_command sets core.fsmonitor=false and core.hooksPath and does not set diff.submodule."
+      },
+      {
+        "file": "src/git.rs",
+        "line": 566,
+        "description": "--attr-source is added only when the installed git accepts it. It suppresses attribute textconv in the child and does not disable diff.external."
+      },
+      {
+        "file": "src/git.rs",
+        "line": 1031,
+        "description": "The untrusted-repo guard test checks fsmonitor, hooksPath, filter overrides, and optional --attr-source, not a diff.submodule or diff.external override."
+      },
+      {
+        "file": "SECURITY.md",
+        "line": 38,
+        "description": "Documented control: queries use --no-ext-diff and --no-textconv to refuse diff and textconv programs in a hostile repository."
+      }
+    ],
+    "conditions": [
+      {
+        "kind": "system_configuration",
+        "description": "The opened superproject sets diff.submodule=diff, and the populated submodule sets diff.external. For the textconv variant, the submodule sets diff.<driver>.textconv with a matching worktree attribute, and the viewer omits --attr-source because git is older than 2.40."
+      },
+      {
+        "kind": "data_state",
+        "description": "The submodule checkout exists and a tracked file in it is modified, so Git treats the gitlink as dirty and emits an inline content diff."
+      },
+      {
+        "kind": "user_interaction",
+        "description": "The viewer runs a diff whose pathspec includes the submodule directory or is empty, which git-status mode on that directory does. A pathspec of a single file inside the submodule did not spawn the child in the local check."
+      },
+      {
+        "kind": "third_party_dependency",
+        "description": "Git 2.43.0 was observed. diff.external runs even when the parent passes --attr-source. diff.<driver>.textconv runs on the omitted --attr-source path and did not run when --attr-source was present."
+      }
+    ],
+    "execution": {
+      "attacker_perspective": "Author of a worktree the operator opens. Set the superproject config diff.submodule=diff and point the submodule diff.external at a program. Leave the submodule checked out with a modified tracked file.",
+      "payloads": [
+        "Submodule diff.external script that appends the line external to a marker file in the scratch directory.",
+        "Submodule diff.evil.textconv script that appends the line textconv to a marker file, with worktree attribute * diff=evil, used on the path that omits --attr-source."
+      ],
+      "instructions": [
+        "Create a local superproject with a checked-out submodule and modify a tracked file in the submodule. Unset GIT_DIR and GIT_WORK_TREE.",
+        "Run git -C <super> -c core.fsmonitor=false -c core.hooksPath=/dev/null --attr-source=4b825dc642cb6eb9a060e54bf8d69288fbee4904 diff --no-ext-diff --no-textconv --no-color HEAD --",
+        "Repeat without --attr-source after replacing diff.external with a diff.<driver>.textconv attribute driver.",
+        "Repeat the whole-tree command with an added -c diff.submodule=short."
+      ],
+      "observed_result": "With diff.external, the marker script ran. The parent argv included --no-ext-diff --no-textconv. The child was git diff --submodule=diff without --no-ext-diff, then the marker. The child environment contained GIT_ATTR_SOURCE set to the empty tree and GIT_CONFIG_PARAMETERS for core.fsmonitor=false and core.hooksPath=/dev/null. Without --attr-source, the textconv marker was written. With --attr-source, textconv did not run. Adding -c diff.submodule=short stopped the marker and printed only the short dirty-gitlink summary."
+    },
+    "remediation": {
+      "strategy": "In base_git_command, pass -c diff.submodule=short. Command-line config overrides a repository diff.submodule=diff, so Git emits the short gitlink summary and does not spawn the inner content diff that would honor the submodule diff.external or textconv.",
+      "code_changes": [
+        {
+          "file_name": "src/git.rs",
+          "fixed_code": "cmd.args([\"-c\", \"core.fsmonitor=false\"]).arg(\"-c\").arg(format!(\"core.hooksPath={NULL_DEVICE}\")).args([\"-c\", \"diff.submodule=short\"]);"
+        }
+      ]
+    },
+    "severity": {
+      "likelihood": {
+        "score": "high",
+        "reason": "A normal git-status-mode directory diff uses this argv, and a pathspec of the submodule directory is enough. The repo author sets both local configs in the worktree the operator opens."
+      },
+      "impact": {
+        "score": "high",
+        "reason": "The submodule command runs as the operator who views the diff. That is code execution in the operator account. It does not take over other accounts."
+      },
+      "overall_severity": "high"
+    },
+    "confidence": {
+      "score": "high",
+      "reason": "Source trace and an independent local marker-script run on git 2.43.0 agree, including the negative result when -c diff.submodule=short is added."
+    }
+  }
+]

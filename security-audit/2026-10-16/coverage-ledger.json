@@ -1,0 +1,833 @@
+[
+  {
+    "coverage_id": "scripts%2Ffetch-or-build.sh%23main::scripts%2Ffetch-or-build.sh%23checksum::scripts%2Ffetch-or-build.sh::SUPPLY-CHAIN-AND-RELEASE.md%23Release%20and%20update%20attack%20classes",
+    "canonical_refs": {
+      "surface": "scripts/fetch-or-build.sh#main",
+      "boundary": "scripts/fetch-or-build.sh#checksum",
+      "subsystem": "scripts/fetch-or-build.sh",
+      "attack_class": "SUPPLY-CHAIN-AND-RELEASE.md#Release and update attack classes"
+    },
+    "surface": "Prebuilt binary install",
+    "boundary": "Checksum verified download",
+    "subsystem": "Install script",
+    "attack_class": "Release and update",
+    "starting_paths": [
+      "scripts/fetch-or-build.sh"
+    ],
+    "ordinary_attack_class_block": null,
+    "selected_companion_blocks": [],
+    "excluded_blocks": [
+      {
+        "block": "SUPPLY-CHAIN-AND-RELEASE.md#Release and update attack classes",
+        "reason": "Install and release workflows are outside the audited diff."
+      }
+    ],
+    "prior_status": "none",
+    "attempts": [],
+    "wave": 1,
+    "status": "out_of_scope",
+    "agent_id": null,
+    "reviewed_paths": [],
+    "local_checks": [],
+    "result_fingerprints": [],
+    "unresolved": [
+      "Install and release workflows are outside the audited diff."
+    ],
+    "assignment_notes": ""
+  },
+  {
+    "coverage_id": "src%2Fcontroller%2Flineselect.rs%23copy_line_content::src%2Fcontroller%2Fmod.rs%23copy_path::src%2Fcontroller::ATTACK-CLASSES.md%23Chained%20vulnerabilities%20and%20trust%20boundaries",
+    "canonical_refs": {
+      "surface": "src/controller/lineselect.rs#copy_line_content",
+      "boundary": "src/controller/mod.rs#copy_path",
+      "subsystem": "src/controller",
+      "attack_class": "ATTACK-CLASSES.md#Chained vulnerabilities and trust boundaries"
+    },
+    "surface": "Clipboard and line-select copy",
+    "boundary": "File bytes and paths must be sanitized before OSC 52 or terminal draw",
+    "subsystem": "Session controller",
+    "attack_class": "Chained vulnerabilities and trust boundaries",
+    "starting_paths": [
+      "src/controller/lineselect.rs",
+      "src/controller/mod.rs",
+      "src/controller/annotation.rs",
+      "src/presenter.rs"
+    ],
+    "ordinary_attack_class_block": "ATTACK-CLASSES.md#Chained vulnerabilities and trust boundaries",
+    "selected_companion_blocks": [
+      "DESKTOP-MOBILE-AND-LOCAL-IPC.md#Core discipline",
+      "DESKTOP-MOBILE-AND-LOCAL-IPC.md#Privileged-helper and local-file attack classes",
+      "DESKTOP-MOBILE-AND-LOCAL-IPC.md#Universal moves",
+      "DESKTOP-MOBILE-AND-LOCAL-IPC.md#Validation rules"
+    ],
+    "excluded_blocks": [
+      {
+        "block": "WEB-PROTOCOL-AND-AUTH.md#HTTP framing and cache attack classes",
+        "reason": "Delta has no HTTP parser or cache header handling; update startup only forwards a resolved boolean."
+      },
+      {
+        "block": "CLIENT-SIDE.md#DOM and object-state attack classes",
+        "reason": "No browser DOM or origin in this TUI."
+      },
+      {
+        "block": "AI-AND-LLM.md#Tool and action attack classes",
+        "reason": "No model or tool-calling surface."
+      },
+      {
+        "block": "CLOUD-AND-DEPLOYMENT.md#Workload identity and IAM attack classes",
+        "reason": "No cloud IAM or workload identity in the delta."
+      },
+      {
+        "block": "PROTOCOLS-RPC-AND-MESSAGING.md#Framing, schema, and interpretation attack classes",
+        "reason": "No custom RPC or broker in the delta."
+      },
+      {
+        "block": "SUPPLY-CHAIN-AND-RELEASE.md#Release and update attack classes",
+        "reason": "Install scripts and release workflows are unchanged in this diff and are out of scope."
+      },
+      {
+        "block": "MEMORY-SAFETY-AND-BINARY.md#Bounds, integer, and representation attack classes",
+        "reason": "Delta adds no unsafe, FFI, or binary loader."
+      },
+      {
+        "block": "DATA-ISOLATION-AND-LIFECYCLE.md#Tenant and object-isolation attack classes",
+        "reason": "Single local operator; no tenant store in the delta."
+      },
+      {
+        "block": "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md#Computational amplification attack classes",
+        "reason": "Copy path has no new unbounded work in the delta."
+      },
+      {
+        "block": "DESKTOP-MOBILE-AND-LOCAL-IPC.md#Deep-link, callback, and navigation attack classes",
+        "reason": "No deep link."
+      },
+      {
+        "block": "DESKTOP-MOBILE-AND-LOCAL-IPC.md#Webview and native-bridge attack classes",
+        "reason": "No webview. Terminal neutralization is the local display boundary."
+      },
+      {
+        "block": "DESKTOP-MOBILE-AND-LOCAL-IPC.md#Local IPC and exported-component attack classes",
+        "reason": "OSC 52 is terminal output, reviewed as local file/display content, not a socket server."
+      },
+      {
+        "block": "DESKTOP-MOBILE-AND-LOCAL-IPC.md#Application-state and device-lifecycle attack classes",
+        "reason": "Annotations stay in memory; delta does not add persistence."
+      }
+    ],
+    "prior_status": "none",
+    "attempts": [],
+    "wave": 1,
+    "status": "covered",
+    "agent_id": "hunter-delta",
+    "reviewed_paths": [
+      "src/app.rs",
+      "src/controller/lineselect.rs",
+      "src/controller/mod.rs",
+      "src/presenter.rs",
+      "src/text_layout.rs"
+    ],
+    "local_checks": [
+      {
+        "agent_id": "hunter-delta",
+        "reviewed_paths": [
+          "src/app.rs",
+          "src/controller/lineselect.rs",
+          "src/controller/mod.rs",
+          "src/presenter.rs",
+          "src/text_layout.rs"
+        ],
+        "invariant": "Copied paths and file bytes are stripped of terminal controls before OSC 52.",
+        "method": "source",
+        "result": "copy_path and copy_line_reference still call sanitize_control. copy_line_content filters controls per line. OSC 52 payload is base64. The line-select rename and ViewState.width removal are not on this path.",
+        "artifact": null
+      }
+    ],
+    "result_fingerprints": [],
+    "unresolved": [],
+    "assignment_notes": "Delta is mostly comments and ViewState.width removal. Confirm sanitization call sites remain."
+  },
+  {
+    "coverage_id": "src%2Fgit.rs%23configured_filter_overrides::src%2Fgit.rs%23git_command::src%2Fgit.rs::ATTACK-CLASSES.md%23Injection",
+    "canonical_refs": {
+      "surface": "src/git.rs#configured_filter_overrides",
+      "boundary": "src/git.rs#git_command",
+      "subsystem": "src/git.rs",
+      "attack_class": "ATTACK-CLASSES.md#Injection"
+    },
+    "surface": "Untrusted repository filter configuration",
+    "boundary": "git_command must not run repo filter, hook, fsmonitor, or ext-diff programs",
+    "subsystem": "Git Service",
+    "attack_class": "Injection",
+    "starting_paths": [
+      "src/git.rs",
+      "src/proc.rs",
+      "SECURITY.md"
+    ],
+    "ordinary_attack_class_block": "ATTACK-CLASSES.md#Injection",
+    "selected_companion_blocks": [
+      "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md#Core discipline",
+      "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md#Computational amplification attack classes",
+      "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md#Failure and recovery attack classes",
+      "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md#Universal moves",
+      "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md#Validation rules",
+      "DESKTOP-MOBILE-AND-LOCAL-IPC.md#Core discipline",
+      "DESKTOP-MOBILE-AND-LOCAL-IPC.md#Privileged-helper and local-file attack classes",
+      "DESKTOP-MOBILE-AND-LOCAL-IPC.md#Universal moves",
+      "DESKTOP-MOBILE-AND-LOCAL-IPC.md#Validation rules"
+    ],
+    "excluded_blocks": [
+      {
+        "block": "WEB-PROTOCOL-AND-AUTH.md#HTTP framing and cache attack classes",
+        "reason": "Delta has no HTTP parser or cache header handling; update startup only forwards a resolved boolean."
+      },
+      {
+        "block": "CLIENT-SIDE.md#DOM and object-state attack classes",
+        "reason": "No browser DOM or origin in this TUI."
+      },
+      {
+        "block": "AI-AND-LLM.md#Tool and action attack classes",
+        "reason": "No model or tool-calling surface."
+      },
+      {
+        "block": "CLOUD-AND-DEPLOYMENT.md#Workload identity and IAM attack classes",
+        "reason": "No cloud IAM or workload identity in the delta."
+      },
+      {
+        "block": "PROTOCOLS-RPC-AND-MESSAGING.md#Framing, schema, and interpretation attack classes",
+        "reason": "No custom RPC or broker in the delta."
+      },
+      {
+        "block": "SUPPLY-CHAIN-AND-RELEASE.md#Release and update attack classes",
+        "reason": "Install scripts and release workflows are unchanged in this diff and are out of scope."
+      },
+      {
+        "block": "MEMORY-SAFETY-AND-BINARY.md#Bounds, integer, and representation attack classes",
+        "reason": "Delta adds no unsafe, FFI, or binary loader."
+      },
+      {
+        "block": "DATA-ISOLATION-AND-LIFECYCLE.md#Tenant and object-isolation attack classes",
+        "reason": "Single local operator; no tenant store in the delta."
+      },
+      {
+        "block": "DESKTOP-MOBILE-AND-LOCAL-IPC.md#Deep-link, callback, and navigation attack classes",
+        "reason": "No deep link on the git command path."
+      },
+      {
+        "block": "DESKTOP-MOBILE-AND-LOCAL-IPC.md#Webview and native-bridge attack classes",
+        "reason": "No webview."
+      },
+      {
+        "block": "DESKTOP-MOBILE-AND-LOCAL-IPC.md#Local IPC and exported-component attack classes",
+        "reason": "Git is a subprocess, not an IPC server."
+      },
+      {
+        "block": "DESKTOP-MOBILE-AND-LOCAL-IPC.md#Application-state and device-lifecycle attack classes",
+        "reason": "No account switch on this path."
+      },
+      {
+        "block": "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md#Resource accumulation attack classes",
+        "reason": "Inventory does not retain a shared queue or cross-request cache of hostile config."
+      },
+      {
+        "block": "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md#Quota and scheduling attack classes",
+        "reason": "No multi-tenant quota. The deadline is the computational bound, covered by computational amplification and failure recovery."
+      }
+    ],
+    "prior_status": "none",
+    "attempts": [],
+    "wave": 1,
+    "status": "candidate",
+    "agent_id": "hunter-git",
+    "reviewed_paths": [
+      "SECURITY.md",
+      "src/app.rs",
+      "src/controller/mod.rs",
+      "src/git.rs",
+      "src/proc.rs"
+    ],
+    "local_checks": [
+      {
+        "agent_id": "hunter-git",
+        "reviewed_paths": [
+          "src/git.rs",
+          "src/proc.rs"
+        ],
+        "invariant": "Filter inventory must fail closed on timeout, overrun, non-success, or a full 1 MiB read, and must not parse a partial listing.",
+        "method": "source",
+        "result": "Holds. configured_filter_overrides_within uses one deadline, a 1 MiB take, and wait_until kill/reap. Partial listings are not parsed. The #207 include.path fifo path still fail-closes.",
+        "artifact": null
+      },
+      {
+        "agent_id": "hunter-git",
+        "reviewed_paths": [
+          "src/git.rs"
+        ],
+        "invariant": "Untrusted filter driver names must not inject an extra -c assignment or leave a same-repo clean, smudge, or process command active.",
+        "method": "source",
+        "result": "Holds for the top-level repository. An equals sign in a driver refuses the inventory. Other bytes stay inside one -c argv. Empty overrides are explicit empty values.",
+        "artifact": null
+      },
+      {
+        "agent_id": "hunter-git",
+        "reviewed_paths": [
+          "src/git.rs",
+          "SECURITY.md"
+        ],
+        "invariant": "Top-level git_command must neutralize fsmonitor, hooks, ext-diff, and textconv on that process.",
+        "method": "source",
+        "result": "Top-level argv holds: core.fsmonitor=false, hooksPath on the null device, redirect env removed, and diff calls pass --no-ext-diff and --no-textconv. Those flags are not forwarded to a submodule child.",
+        "artifact": null
+      },
+      {
+        "agent_id": "verifier-sub",
+        "reviewed_paths": [
+          "src/git.rs",
+          "src/controller/mod.rs",
+          "src/app.rs",
+          "SECURITY.md"
+        ],
+        "invariant": "A submodule content diff spawned for the viewer's diff must not run the submodule diff.external or textconv program.",
+        "method": "source",
+        "result": "Confirmed distinct from #207. On git 2.43.0 the viewer diff argv still executed a submodule diff.external marker when the superproject set diff.submodule=diff. The child argv was git diff --submodule=diff without --no-ext-diff. Omitting --attr-source also executed diff.<driver>.textconv. Adding -c diff.submodule=short stopped the marker.",
+        "artifact": null
+      }
+    ],
+    "result_fingerprints": [
+      "src/git.rs:git_command:nested-submodule-unhardened-child"
+    ],
+    "unresolved": [],
+    "assignment_notes": "Revalidate merged PR #207. Do not re-open the include.path fifo hang if the 2s/1MiB fail-closed path still holds. A distinct command-execution bypass is in scope.",
+    "hardening": []
+  },
+  {
+    "coverage_id": "src%2Finput.rs%23REGISTRY::src%2Fintent.rs%23Intent::src%2Finput.rs::ATTACK-CLASSES.md%23Obvious%20things",
+    "canonical_refs": {
+      "surface": "src/input.rs#REGISTRY",
+      "boundary": "src/intent.rs#Intent",
+      "subsystem": "src/input.rs",
+      "attack_class": "ATTACK-CLASSES.md#Obvious things"
+    },
+    "surface": "Key registry and removed helpers",
+    "boundary": "Cleanup must not drop a security check or embed a secret",
+    "subsystem": "Input and intent cleanup",
+    "attack_class": "Obvious things",
+    "starting_paths": [
+      "src/input.rs",
+      "src/intent.rs",
+      "src/help.rs",
+      "src/editor.rs",
+      "src/herdr.rs",
+      "src/finder.rs",
+      "src/infile.rs",
+      "src/lib.rs",
+      "src/worktree.rs",
+      "src/app.rs"
+    ],
+    "ordinary_attack_class_block": "ATTACK-CLASSES.md#Obvious things",
+    "selected_companion_blocks": [],
+    "excluded_blocks": [
+      {
+        "block": "WEB-PROTOCOL-AND-AUTH.md#HTTP framing and cache attack classes",
+        "reason": "Delta has no HTTP parser or cache header handling; update startup only forwards a resolved boolean."
+      },
+      {
+        "block": "CLIENT-SIDE.md#DOM and object-state attack classes",
+        "reason": "No browser DOM or origin in this TUI."
+      },
+      {
+        "block": "AI-AND-LLM.md#Tool and action attack classes",
+        "reason": "No model or tool-calling surface."
+      },
+      {
+        "block": "CLOUD-AND-DEPLOYMENT.md#Workload identity and IAM attack classes",
+        "reason": "No cloud IAM or workload identity in the delta."
+      },
+      {
+        "block": "PROTOCOLS-RPC-AND-MESSAGING.md#Framing, schema, and interpretation attack classes",
+        "reason": "No custom RPC or broker in the delta."
+      },
+      {
+        "block": "SUPPLY-CHAIN-AND-RELEASE.md#Release and update attack classes",
+        "reason": "Install scripts and release workflows are unchanged in this diff and are out of scope."
+      },
+      {
+        "block": "MEMORY-SAFETY-AND-BINARY.md#Bounds, integer, and representation attack classes",
+        "reason": "Delta adds no unsafe, FFI, or binary loader."
+      },
+      {
+        "block": "DATA-ISOLATION-AND-LIFECYCLE.md#Tenant and object-isolation attack classes",
+        "reason": "Single local operator; no tenant store in the delta."
+      }
+    ],
+    "prior_status": "none",
+    "attempts": [],
+    "wave": 1,
+    "status": "covered",
+    "agent_id": "hunter-delta",
+    "reviewed_paths": [
+      "src/app.rs",
+      "src/editor.rs",
+      "src/finder.rs",
+      "src/help.rs",
+      "src/herdr.rs",
+      "src/infile.rs",
+      "src/input.rs",
+      "src/intent.rs",
+      "src/lib.rs",
+      "src/worktree.rs"
+    ],
+    "local_checks": [
+      {
+        "agent_id": "hunter-delta",
+        "reviewed_paths": [
+          "src/app.rs",
+          "src/editor.rs",
+          "src/finder.rs",
+          "src/help.rs",
+          "src/herdr.rs",
+          "src/infile.rs",
+          "src/input.rs",
+          "src/intent.rs",
+          "src/lib.rs",
+          "src/worktree.rs"
+        ],
+        "invariant": "Comment and dead-helper cleanup must not delete a security check or embed a secret.",
+        "method": "source",
+        "result": "The delta removes comments, allow(dead_code), an unused helper, and SpawnError's io::Error conversion. No secret or new shell execution was introduced.",
+        "artifact": null
+      }
+    ],
+    "result_fingerprints": [],
+    "unresolved": [],
+    "assignment_notes": "Comment, help-text, and dead-helper cleanup. Look for a deleted check, not style."
+  },
+  {
+    "coverage_id": "src%2Flaunch.rs%23is_flag_safe::src%2Flaunch.rs%23launch_decision::src%2Flaunch.rs::ATTACK-CLASSES.md%23Injection",
+    "canonical_refs": {
+      "surface": "src/launch.rs#is_flag_safe",
+      "boundary": "src/launch.rs#launch_decision",
+      "subsystem": "src/launch.rs",
+      "attack_class": "ATTACK-CLASSES.md#Injection"
+    },
+    "surface": "herdr pane list JSON",
+    "boundary": "Pane id flag-safety",
+    "subsystem": "Launch decision",
+    "attack_class": "Injection",
+    "starting_paths": [
+      "src/launch.rs"
+    ],
+    "ordinary_attack_class_block": "ATTACK-CLASSES.md#Injection",
+    "selected_companion_blocks": [],
+    "excluded_blocks": [
+      {
+        "block": "ATTACK-CLASSES.md#Injection",
+        "reason": "Launcher pane-id validation was not modified in the audited diff."
+      }
+    ],
+    "prior_status": "none",
+    "attempts": [],
+    "wave": 1,
+    "status": "out_of_scope",
+    "agent_id": null,
+    "reviewed_paths": [],
+    "local_checks": [],
+    "result_fingerprints": [],
+    "unresolved": [
+      "Launcher pane-id validation was not modified in the audited diff."
+    ],
+    "assignment_notes": ""
+  },
+  {
+    "coverage_id": "src%2Fopener.rs%23opener_argv::src%2Fapp.rs%23OpenerSpawner::src%2Fopener.rs::ATTACK-CLASSES.md%23Injection",
+    "canonical_refs": {
+      "surface": "src/opener.rs#opener_argv",
+      "boundary": "src/app.rs#OpenerSpawner",
+      "subsystem": "src/opener.rs",
+      "attack_class": "ATTACK-CLASSES.md#Injection"
+    },
+    "surface": "OS open and reveal",
+    "boundary": "Configured opener argv",
+    "subsystem": "OS opener",
+    "attack_class": "Injection",
+    "starting_paths": [
+      "src/opener.rs"
+    ],
+    "ordinary_attack_class_block": "ATTACK-CLASSES.md#Injection",
+    "selected_companion_blocks": [],
+    "excluded_blocks": [
+      {
+        "block": "ATTACK-CLASSES.md#Injection",
+        "reason": "Opener argv construction was not modified in the audited diff."
+      }
+    ],
+    "prior_status": "none",
+    "attempts": [],
+    "wave": 1,
+    "status": "out_of_scope",
+    "agent_id": null,
+    "reviewed_paths": [],
+    "local_checks": [],
+    "result_fingerprints": [],
+    "unresolved": [
+      "Opener argv construction was not modified in the audited diff."
+    ],
+    "assignment_notes": ""
+  },
+  {
+    "coverage_id": "src%2Frender.rs%23run_renderer_until::src%2Fproc.rs%23in_launch_dir::src%2Frender.rs::ATTACK-CLASSES.md%23Injection",
+    "canonical_refs": {
+      "surface": "src/render.rs#run_renderer_until",
+      "boundary": "src/proc.rs#in_launch_dir",
+      "subsystem": "src/render.rs",
+      "attack_class": "ATTACK-CLASSES.md#Injection"
+    },
+    "surface": "Renderer and helper subprocesses",
+    "boundary": "Untrusted cwd and file bytes must not become a shell or a relative program path",
+    "subsystem": "Content Renderer and process helper",
+    "attack_class": "Injection",
+    "starting_paths": [
+      "src/render.rs",
+      "src/proc.rs",
+      "src/editor.rs",
+      "src/herdr.rs",
+      "src/app.rs"
+    ],
+    "ordinary_attack_class_block": "ATTACK-CLASSES.md#Injection",
+    "selected_companion_blocks": [
+      "DESKTOP-MOBILE-AND-LOCAL-IPC.md#Core discipline",
+      "DESKTOP-MOBILE-AND-LOCAL-IPC.md#Privileged-helper and local-file attack classes",
+      "DESKTOP-MOBILE-AND-LOCAL-IPC.md#Universal moves",
+      "DESKTOP-MOBILE-AND-LOCAL-IPC.md#Validation rules"
+    ],
+    "excluded_blocks": [
+      {
+        "block": "WEB-PROTOCOL-AND-AUTH.md#HTTP framing and cache attack classes",
+        "reason": "Delta has no HTTP parser or cache header handling; update startup only forwards a resolved boolean."
+      },
+      {
+        "block": "CLIENT-SIDE.md#DOM and object-state attack classes",
+        "reason": "No browser DOM or origin in this TUI."
+      },
+      {
+        "block": "AI-AND-LLM.md#Tool and action attack classes",
+        "reason": "No model or tool-calling surface."
+      },
+      {
+        "block": "CLOUD-AND-DEPLOYMENT.md#Workload identity and IAM attack classes",
+        "reason": "No cloud IAM or workload identity in the delta."
+      },
+      {
+        "block": "PROTOCOLS-RPC-AND-MESSAGING.md#Framing, schema, and interpretation attack classes",
+        "reason": "No custom RPC or broker in the delta."
+      },
+      {
+        "block": "SUPPLY-CHAIN-AND-RELEASE.md#Release and update attack classes",
+        "reason": "Install scripts and release workflows are unchanged in this diff and are out of scope."
+      },
+      {
+        "block": "MEMORY-SAFETY-AND-BINARY.md#Bounds, integer, and representation attack classes",
+        "reason": "Delta adds no unsafe, FFI, or binary loader."
+      },
+      {
+        "block": "DATA-ISOLATION-AND-LIFECYCLE.md#Tenant and object-isolation attack classes",
+        "reason": "Single local operator; no tenant store in the delta."
+      },
+      {
+        "block": "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md#Computational amplification attack classes",
+        "reason": "Renderer wall-clock and output caps were not changed in this delta; existing caps remain and this unit checks the error-detail removal did not drop them."
+      },
+      {
+        "block": "DESKTOP-MOBILE-AND-LOCAL-IPC.md#Deep-link, callback, and navigation attack classes",
+        "reason": "No deep link."
+      },
+      {
+        "block": "DESKTOP-MOBILE-AND-LOCAL-IPC.md#Webview and native-bridge attack classes",
+        "reason": "No webview."
+      },
+      {
+        "block": "DESKTOP-MOBILE-AND-LOCAL-IPC.md#Local IPC and exported-component attack classes",
+        "reason": "Helpers are spawned processes with argv, not an IPC server."
+      },
+      {
+        "block": "DESKTOP-MOBILE-AND-LOCAL-IPC.md#Application-state and device-lifecycle attack classes",
+        "reason": "No account lifecycle."
+      }
+    ],
+    "prior_status": "none",
+    "attempts": [],
+    "wave": 1,
+    "status": "covered",
+    "agent_id": "hunter-delta",
+    "reviewed_paths": [
+      "src/app.rs",
+      "src/editor.rs",
+      "src/herdr.rs",
+      "src/proc.rs",
+      "src/render.rs"
+    ],
+    "local_checks": [
+      {
+        "agent_id": "hunter-delta",
+        "reviewed_paths": [
+          "src/app.rs",
+          "src/editor.rs",
+          "src/herdr.rs",
+          "src/proc.rs",
+          "src/render.rs"
+        ],
+        "invariant": "Untrusted file bytes and the viewed-repo cwd must not become a shell command or the directory used to resolve a relative helper.",
+        "method": "source",
+        "result": "Renderer bytes stay on stdin. Output is capped. wait_until still enforces the deadline. in_launch_dir still pins helper cwd. Dropping RendererError detail and the wait_bounded alias did not remove those controls.",
+        "artifact": null
+      }
+    ],
+    "result_fingerprints": [],
+    "unresolved": [],
+    "assignment_notes": "Delta drops RendererError detail strings and wait_bounded alias. Confirm caps, stdin feeding, and launch-dir pinning remain."
+  },
+  {
+    "coverage_id": "src%2Froot.rs%23trusted_toplevel::src%2Froot.rs%23directory_owning_git_dir::src%2Froot.rs::ATTACK-CLASSES.md%23Resource%20and%20file%20handling",
+    "canonical_refs": {
+      "surface": "src/root.rs#trusted_toplevel",
+      "boundary": "src/root.rs#directory_owning_git_dir",
+      "subsystem": "src/root.rs",
+      "attack_class": "ATTACK-CLASSES.md#Resource and file handling"
+    },
+    "surface": "Git toplevel reported for the opened directory",
+    "boundary": "Filesystem .git entry must own the same directory as git's toplevel",
+    "subsystem": "Root Resolver",
+    "attack_class": "Resource and file handling",
+    "starting_paths": [
+      "src/root.rs",
+      "tests/root.rs",
+      "SECURITY.md"
+    ],
+    "ordinary_attack_class_block": "ATTACK-CLASSES.md#Resource and file handling",
+    "selected_companion_blocks": [
+      "DESKTOP-MOBILE-AND-LOCAL-IPC.md#Core discipline",
+      "DESKTOP-MOBILE-AND-LOCAL-IPC.md#Privileged-helper and local-file attack classes",
+      "DESKTOP-MOBILE-AND-LOCAL-IPC.md#Universal moves",
+      "DESKTOP-MOBILE-AND-LOCAL-IPC.md#Validation rules"
+    ],
+    "excluded_blocks": [
+      {
+        "block": "WEB-PROTOCOL-AND-AUTH.md#HTTP framing and cache attack classes",
+        "reason": "Delta has no HTTP parser or cache header handling; update startup only forwards a resolved boolean."
+      },
+      {
+        "block": "CLIENT-SIDE.md#DOM and object-state attack classes",
+        "reason": "No browser DOM or origin in this TUI."
+      },
+      {
+        "block": "AI-AND-LLM.md#Tool and action attack classes",
+        "reason": "No model or tool-calling surface."
+      },
+      {
+        "block": "CLOUD-AND-DEPLOYMENT.md#Workload identity and IAM attack classes",
+        "reason": "No cloud IAM or workload identity in the delta."
+      },
+      {
+        "block": "PROTOCOLS-RPC-AND-MESSAGING.md#Framing, schema, and interpretation attack classes",
+        "reason": "No custom RPC or broker in the delta."
+      },
+      {
+        "block": "SUPPLY-CHAIN-AND-RELEASE.md#Release and update attack classes",
+        "reason": "Install scripts and release workflows are unchanged in this diff and are out of scope."
+      },
+      {
+        "block": "MEMORY-SAFETY-AND-BINARY.md#Bounds, integer, and representation attack classes",
+        "reason": "Delta adds no unsafe, FFI, or binary loader."
+      },
+      {
+        "block": "DATA-ISOLATION-AND-LIFECYCLE.md#Tenant and object-isolation attack classes",
+        "reason": "Single local operator; no tenant store in the delta."
+      },
+      {
+        "block": "DESKTOP-MOBILE-AND-LOCAL-IPC.md#Deep-link, callback, and navigation attack classes",
+        "reason": "No deep link or custom URL scheme in root resolution."
+      },
+      {
+        "block": "DESKTOP-MOBILE-AND-LOCAL-IPC.md#Webview and native-bridge attack classes",
+        "reason": "No webview."
+      },
+      {
+        "block": "DESKTOP-MOBILE-AND-LOCAL-IPC.md#Local IPC and exported-component attack classes",
+        "reason": "No socket or exported component on this path."
+      },
+      {
+        "block": "DESKTOP-MOBILE-AND-LOCAL-IPC.md#Application-state and device-lifecycle attack classes",
+        "reason": "Root resolution does not persist account or device state."
+      },
+      {
+        "block": "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md#Computational amplification attack classes",
+        "reason": "Unbounded gitfile read is hunted with the git inventory unit's resource class only if the root hunter reports it as uncovered; this unit's obligation is path containment."
+      }
+    ],
+    "prior_status": "none",
+    "attempts": [],
+    "wave": 1,
+    "status": "covered",
+    "agent_id": "hunter-root",
+    "reviewed_paths": [
+      "src/root.rs",
+      "tests/root.rs",
+      "SECURITY.md",
+      "src/render.rs",
+      "src/tree.rs",
+      "src/git.rs",
+      "src/app.rs",
+      "src/repo_search.rs"
+    ],
+    "local_checks": [
+      {
+        "agent_id": "hunter-root",
+        "reviewed_paths": [
+          "src/root.rs",
+          "tests/root.rs",
+          "SECURITY.md",
+          "src/render.rs",
+          "src/tree.rs",
+          "src/git.rs",
+          "src/app.rs",
+          "src/repo_search.rs"
+        ],
+        "invariant": "A git toplevel is accepted only when its canonical path equals the directory whose .git entry resolves to git's reported git dir.",
+        "method": "source",
+        "result": "trusted_toplevel still rejects a foreign core.worktree. Equality of canonical paths plus the ancestor walk fail closed for sibling, ancestor, relative, and trailing-space targets. Later reads re-check containment. The merged #206 escape is not reopened.",
+        "artifact": null
+      }
+    ],
+    "result_fingerprints": [],
+    "unresolved": [],
+    "assignment_notes": "Revalidate merged PR #206. Do not re-open the same core.worktree escape if the equality check still holds. A distinct bypass is in scope.",
+    "hardening": [
+      "gitfile_target uses read_to_string with no size cap. Blast radius is the operator's own viewer process, so this is hardening rather than a shared-impact finding.",
+      "trusted_toplevel returns git's pre-canonical toplevel string after the canonical equality succeeds. A later symlink swap of a path component is a check-to-use window with no demonstrated cross-account result."
+    ]
+  },
+  {
+    "coverage_id": "src%2Fupdate%2Fgateway.rs%23DocumentGateway::src%2Fupdate%2Fgateway.rs%23curl_command::src%2Fupdate%2Fgateway.rs::WEB-PROTOCOL-AND-AUTH.md%23HTTP%20framing%20and%20cache%20attack%20classes",
+    "canonical_refs": {
+      "surface": "src/update/gateway.rs#DocumentGateway",
+      "boundary": "src/update/gateway.rs#curl_command",
+      "subsystem": "src/update/gateway.rs",
+      "attack_class": "WEB-PROTOCOL-AND-AUTH.md#HTTP framing and cache attack classes"
+    },
+    "surface": "Fixed official HTTPS documents",
+    "boundary": "curl flags and body cap",
+    "subsystem": "Update gateway",
+    "attack_class": "HTTP framing and cache",
+    "starting_paths": [
+      "src/update/gateway.rs"
+    ],
+    "ordinary_attack_class_block": null,
+    "selected_companion_blocks": [],
+    "excluded_blocks": [
+      {
+        "block": "WEB-PROTOCOL-AND-AUTH.md#HTTP framing and cache attack classes",
+        "reason": "Gateway HTTP client was not modified in the audited diff."
+      }
+    ],
+    "prior_status": "none",
+    "attempts": [],
+    "wave": 1,
+    "status": "out_of_scope",
+    "agent_id": null,
+    "reviewed_paths": [],
+    "local_checks": [],
+    "result_fingerprints": [],
+    "unresolved": [
+      "Gateway HTTP client was not modified in the audited diff."
+    ],
+    "assignment_notes": ""
+  },
+  {
+    "coverage_id": "src%2Fupdate%2Fmod.rs%23start_default_with::src%2Fconfig.rs%23resolve::src%2Fupdate%2Fmod.rs::ATTACK-CLASSES.md%23Business%20logic",
+    "canonical_refs": {
+      "surface": "src/update/mod.rs#start_default_with",
+      "boundary": "src/config.rs#resolve",
+      "subsystem": "src/update/mod.rs",
+      "attack_class": "ATTACK-CLASSES.md#Business logic"
+    },
+    "surface": "Update-check startup flag",
+    "boundary": "Resolved config precedence must not be replaced by a second env read",
+    "subsystem": "Official repository gateway startup",
+    "attack_class": "Business logic",
+    "starting_paths": [
+      "src/update/mod.rs",
+      "src/config.rs",
+      "src/app.rs"
+    ],
+    "ordinary_attack_class_block": "ATTACK-CLASSES.md#Business logic",
+    "selected_companion_blocks": [],
+    "excluded_blocks": [
+      {
+        "block": "WEB-PROTOCOL-AND-AUTH.md#HTTP framing and cache attack classes",
+        "reason": "Delta has no HTTP parser or cache header handling; update startup only forwards a resolved boolean."
+      },
+      {
+        "block": "CLIENT-SIDE.md#DOM and object-state attack classes",
+        "reason": "No browser DOM or origin in this TUI."
+      },
+      {
+        "block": "AI-AND-LLM.md#Tool and action attack classes",
+        "reason": "No model or tool-calling surface."
+      },
+      {
+        "block": "CLOUD-AND-DEPLOYMENT.md#Workload identity and IAM attack classes",
+        "reason": "No cloud IAM or workload identity in the delta."
+      },
+      {
+        "block": "PROTOCOLS-RPC-AND-MESSAGING.md#Framing, schema, and interpretation attack classes",
+        "reason": "No custom RPC or broker in the delta."
+      },
+      {
+        "block": "SUPPLY-CHAIN-AND-RELEASE.md#Release and update attack classes",
+        "reason": "Install scripts and release workflows are unchanged in this diff and are out of scope."
+      },
+      {
+        "block": "MEMORY-SAFETY-AND-BINARY.md#Bounds, integer, and representation attack classes",
+        "reason": "Delta adds no unsafe, FFI, or binary loader."
+      },
+      {
+        "block": "DATA-ISOLATION-AND-LIFECYCLE.md#Tenant and object-isolation attack classes",
+        "reason": "Single local operator; no tenant store in the delta."
+      },
+      {
+        "block": "DESKTOP-MOBILE-AND-LOCAL-IPC.md#Privileged-helper and local-file attack classes",
+        "reason": "This delta path only forwards a boolean; it does not spawn a helper."
+      },
+      {
+        "block": "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md#Computational amplification attack classes",
+        "reason": "Refresh deadline code in gateway.rs is unchanged and out of scope."
+      }
+    ],
+    "prior_status": "none",
+    "attempts": [],
+    "wave": 1,
+    "status": "covered",
+    "agent_id": "hunter-delta",
+    "reviewed_paths": [
+      "src/app.rs",
+      "src/config.rs",
+      "src/update/mod.rs"
+    ],
+    "local_checks": [
+      {
+        "agent_id": "hunter-delta",
+        "reviewed_paths": [
+          "src/app.rs",
+          "src/config.rs",
+          "src/update/mod.rs"
+        ],
+        "invariant": "Remote-notice enablement stays config, then HERDR_FILE_VIEWER_NO_UPDATE_CHECK, then default. A disabled decision performs no network I/O.",
+        "method": "source",
+        "result": "app::run passes the resolved eff.update_check into start_default_with. disabled=true returns before cache load or thread spawn. The removed start_default no longer re-reads the env.",
+        "artifact": null
+      }
+    ],
+    "result_fingerprints": [],
+    "unresolved": [],
+    "assignment_notes": "Confirm removing start_default did not re-enable an env override of update_check=true or skip a disable."
+  }
+]

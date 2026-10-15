@@ -1,0 +1,73 @@
+{
+  "run_id": "herdr-file-viewer-run-1",
+  "repo": "smarzban/herdr-file-viewer",
+  "target": "/workspace",
+  "source_ref": {
+    "commit": "d89246d006e563f16b577468f04e13365d57fce6",
+    "dirty": false,
+    "baseline_commit": "3996b88d6c6ca5608872abedf05067a803a168ec",
+    "delta_commits": [
+      "3efed160cacb",
+      "33a3629e4c34",
+      "621279ad343a",
+      "3d37c6ba8075",
+      "d89246d006e563f16b577468f04e13365d57fce6"
+    ]
+  },
+  "profile": "standard",
+  "scope": "scoped-delta",
+  "scope_paths": [
+    "ARCHITECTURE.md",
+    "CHANGELOG.md",
+    "SECURITY.md",
+    "docs",
+    "src/app.rs",
+    "src/config.rs",
+    "src/controller",
+    "src/editor.rs",
+    "src/finder.rs",
+    "src/git.rs",
+    "src/help.rs",
+    "src/herdr.rs",
+    "src/infile.rs",
+    "src/input.rs",
+    "src/intent.rs",
+    "src/lib.rs",
+    "src/presenter.rs",
+    "src/proc.rs",
+    "src/render.rs",
+    "src/root.rs",
+    "src/update/mod.rs",
+    "src/worktree.rs",
+    "tests"
+  ],
+  "budget": null,
+  "execution_policy": "sandboxed-source-and-local-only",
+  "selected_companion_files": [
+    "DESKTOP-MOBILE-AND-LOCAL-IPC.md",
+    "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md"
+  ],
+  "prior_run_paths": [],
+  "prior_ledger_status": "no compatible coverage-ledger.json or findings.json found on security-audit/* branches, git history, or local stores",
+  "shared_file_owners": {
+    "parent": "coordinator"
+  },
+  "run_status": "complete",
+  "skill_directory": "/tmp/security-audit-skill/skills/security-audit",
+  "output_directory": "/home/ubuntu/security-audit-skill/herdr-file-viewer/run-1",
+  "agents_spent": {
+    "reconnaissance": 4,
+    "hunters": 3,
+    "post_wave_critic": 1,
+    "final_clean_critic": 1,
+    "candidate_verifier": 1,
+    "record_verifier": 1
+  },
+  "confirmed_fingerprints": [
+    "src/git.rs:git_command:nested-submodule-unhardened-child"
+  ],
+  "prior_fixes_revalidated": [
+    "#206 core.worktree containment holds",
+    "#207 filter inventory fail-closed holds"
+  ]
+}
