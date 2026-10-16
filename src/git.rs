@@ -428,10 +428,24 @@ const FILTER_INVENTORY_TIMEOUT: Duration = Duration::from_secs(2);
 /// it is refused rather than turned into a partial override list.
 const MAX_FILTER_INVENTORY_BYTES: u64 = 1024 * 1024;
 
-/// Read filter driver names without consulting attributes or the index, then return command-line
-/// overrides that make every configured filter a non-required no-op. Git's documented behavior for
-/// a filter without a command is pass-through; in git 2.39's `convert.c`, empty clean/process
-/// strings are likewise rejected by the `*cmd` check before any child can spawn.
+/// Deepest submodule nesting the inventory follows. Deeper nesting (or a `.git` that leads back
+/// into an enclosing worktree) makes the inventory unavailable, so the query is refused.
+const MAX_SUBMODULE_DEPTH: usize = 8;
+
+/// Submodule repositories inventoried at once. Each inventory runs up to three short-lived git
+/// processes, so this bounds concurrent children (and their pipes) for a many-submodule repo.
+const SUBMODULE_INVENTORY_PARALLELISM: usize = 8;
+
+/// Read filter driver names without consulting attributes or invoking filters, then return
+/// command-line overrides that make every configured filter a non-required no-op. Git's documented
+/// behavior for a filter without a command is pass-through; in git 2.39's `convert.c`, empty
+/// clean/process strings are likewise rejected by the `*cmd` check before any child can spawn.
+///
+/// The names come from the opened repository AND every populated submodule below it, recursively.
+/// `git status` / `git diff` spawn `git status` inside each populated submodule to detect a dirty
+/// one; that child inherits these `-c` overrides through `GIT_CONFIG_PARAMETERS`, but it reads the
+/// submodule's own config and `$GIT_DIR/info/attributes`, so a driver named only there would run
+/// unless it is neutralized here too.
 fn configured_filter_overrides(repo_root: &Path) -> Option<Vec<OsString>> {
     configured_filter_overrides_within(repo_root, FILTER_INVENTORY_TIMEOUT)
 }
@@ -440,17 +454,130 @@ fn configured_filter_overrides_within(
     repo_root: &Path,
     timeout: Duration,
 ) -> Option<Vec<OsString>> {
-    // One deadline covers both the child's exit and the reader thread's hand-off.
+    // One deadline covers the whole inventory: every repository, every child and reader thread.
     let deadline = Instant::now() + timeout;
-    let mut child = base_git_command(repo_root)
-        .args([
+    let mut drivers = BTreeSet::new();
+    let mut level = vec![repo_root.to_path_buf()];
+    for depth in 0.. {
+        if level.is_empty() {
+            return filter_overrides_from_names(drivers);
+        }
+        if depth > MAX_SUBMODULE_DEPTH {
+            return None;
+        }
+        let mut next = Vec::new();
+        for batch in level.chunks(SUBMODULE_INVENTORY_PARALLELISM) {
+            let inventories: Vec<Option<RepoInventory>> = std::thread::scope(|scope| {
+                let workers: Vec<_> = batch
+                    .iter()
+                    .map(|dir| scope.spawn(move || inventory_repo(dir, depth > 0, deadline)))
+                    .collect();
+                workers
+                    .into_iter()
+                    .map(|worker| worker.join().ok().flatten())
+                    .collect()
+            });
+            for inventory in inventories {
+                let inventory = inventory?;
+                drivers.extend(inventory.drivers);
+                next.extend(inventory.populated_submodules);
+            }
+        }
+        level = next;
+    }
+    unreachable!("the depth loop returns")
+}
+
+/// One repository's share of the filter inventory.
+struct RepoInventory {
+    drivers: BTreeSet<Vec<u8>>,
+    /// Worktree paths of the populated submodules registered in this repository's index.
+    populated_submodules: Vec<PathBuf>,
+}
+
+/// Inventory `dir`'s configured filter driver names and populated submodules. Built-in
+/// `git config`, `git ls-files` and `git rev-parse` only: they read configuration and the index,
+/// never attributes, and never invoke filter drivers. The children run concurrently so the
+/// gitlink scan adds little to the config read it accompanies.
+fn inventory_repo(dir: &Path, is_submodule: bool, deadline: Instant) -> Option<RepoInventory> {
+    let config = spawn_inventory_reader(
+        dir,
+        &[
             "config",
             "--includes",
             "--null",
             "--name-only",
             "--get-regexp",
             r"^filter\.",
-        ])
+        ],
+        read_capped,
+    )?;
+    // The index, not `.gitmodules`, is what git consults: a gitlink with no `.gitmodules` entry
+    // is still checked for a dirty worktree.
+    let gitlinks = spawn_inventory_reader(dir, &["ls-files", "--stage", "-z"], read_gitlinks)?;
+    // A submodule's own `core.worktree` decides where its nested status runs. Follow it only when
+    // it is the checkout the superproject sees; anything else is not a complete inventory.
+    let toplevel = if is_submodule {
+        Some(spawn_inventory_reader(
+            dir,
+            &["rev-parse", "--show-toplevel"],
+            read_capped,
+        )?)
+    } else {
+        None
+    };
+
+    let (config_status, config_out) = config.finish(deadline)?;
+    let (gitlinks_status, gitlinks) = gitlinks.finish(deadline)?;
+    let toplevel = match toplevel {
+        Some(reader) => Some(reader.finish(deadline)?),
+        None => None,
+    };
+
+    // `git config --get-regexp` returns 1 for no matches. Every other failure is unsafe to
+    // interpret as "no filters": fail closed rather than running the requested repo query with
+    // an incomplete inventory.
+    let config_out = config_out?;
+    let no_matches = config_status.code() == Some(1) && config_out.is_empty();
+    if !(config_status.success() || no_matches) || !gitlinks_status.success() {
+        return None;
+    }
+    if let Some((status, out)) = toplevel {
+        let out = out?;
+        let reported = std::str::from_utf8(&out).ok()?.strip_suffix('\n')?;
+        if !status.success()
+            || Path::new(reported).canonicalize().ok()? != dir.canonicalize().ok()?
+        {
+            return None;
+        }
+    }
+
+    // Git checks a gitlink for dirtiness only when `<path>/.git` exists; an unpopulated submodule
+    // has no repository whose config could name a filter.
+    let populated_submodules = gitlinks?
+        .into_iter()
+        .map(|path| dir.join(path))
+        .filter(|checkout| checkout.join(".git").exists())
+        .collect();
+    Some(RepoInventory {
+        drivers: configured_filter_driver_names(&config_out),
+        populated_submodules,
+    })
+}
+
+/// A spawned inventory child whose stdout is consumed on its own thread.
+struct InventoryReader<T> {
+    child: std::process::Child,
+    output: mpsc::Receiver<Option<T>>,
+}
+
+fn spawn_inventory_reader<T: Send + 'static>(
+    dir: &Path,
+    args: &[&str],
+    read: fn(std::process::ChildStdout) -> Option<T>,
+) -> Option<InventoryReader<T>> {
+    let mut child = base_git_command(dir)
+        .args(args)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
@@ -460,35 +587,83 @@ fn configured_filter_overrides_within(
         let _ = crate::proc::terminate_and_reap(&mut child);
         return None;
     };
-    let (sender, receiver) = mpsc::channel();
+    let (sender, output) = mpsc::channel();
     std::thread::spawn(move || {
-        let mut buf = Vec::new();
-        let _ = stdout
-            .take(MAX_FILTER_INVENTORY_BYTES)
-            .read_to_end(&mut buf);
-        let _ = sender.send(buf);
+        let _ = sender.send(read(stdout));
     });
-    // On overrun the child is killed and reaped. Do not parse a partial listing.
-    let status = crate::proc::wait_until(&mut child, deadline)?;
-    let stdout = receiver
-        .recv_timeout(deadline.saturating_duration_since(Instant::now()))
-        .ok()?;
-    if stdout.len() as u64 >= MAX_FILTER_INVENTORY_BYTES {
-        return None;
-    }
-    // `git config --get-regexp` returns 1 for no matches. Every other failure is unsafe to
-    // interpret as "no filters": fail closed rather than running the requested repo query with
-    // an incomplete inventory.
-    let no_matches = status.code() == Some(1) && stdout.is_empty();
-    if !(status.success() || no_matches) {
-        return None;
-    }
-
-    filter_overrides_from_config(&stdout)
+    Some(InventoryReader { child, output })
 }
 
+impl<T> InventoryReader<T> {
+    /// The child's exit status and parsed stdout (`None` when the reader refused it). On overrun
+    /// the child is killed and reaped and nothing is returned: a partial listing is never parsed.
+    fn finish(mut self, deadline: Instant) -> Option<(std::process::ExitStatus, Option<T>)> {
+        // Waiting for end-of-output first returns as soon as the child is done, rather than at
+        // the next exit poll. A missed deadline still kills and reaps the child below.
+        let output = self
+            .output
+            .recv_timeout(deadline.saturating_duration_since(Instant::now()));
+        let status = crate::proc::wait_until(&mut self.child, deadline)?;
+        Some((status, output.ok()?))
+    }
+}
+
+impl<T> Drop for InventoryReader<T> {
+    /// A reader abandoned early (a sibling failed to spawn) must not leave its child running.
+    /// After [`InventoryReader::finish`] the status is already reaped, so this is a no-op.
+    fn drop(&mut self) {
+        let _ = crate::proc::terminate_and_reap(&mut self.child);
+    }
+}
+
+/// Read a whole listing, refusing one that reaches the byte cap (it may be truncated).
+fn read_capped(stdout: std::process::ChildStdout) -> Option<Vec<u8>> {
+    let mut buf = Vec::new();
+    stdout
+        .take(MAX_FILTER_INVENTORY_BYTES)
+        .read_to_end(&mut buf)
+        .ok()?;
+    ((buf.len() as u64) < MAX_FILTER_INVENTORY_BYTES).then_some(buf)
+}
+
+/// Stream `git ls-files --stage -z` and keep only gitlink (mode 160000) paths. The full listing
+/// is proportional to the tracked-file count and is never buffered; only the retained gitlink
+/// paths count against the byte cap.
+fn read_gitlinks(stdout: std::process::ChildStdout) -> Option<Vec<PathBuf>> {
+    parse_gitlinks(std::io::BufReader::with_capacity(64 * 1024, stdout))
+}
+
+fn parse_gitlinks(mut listing: impl std::io::BufRead) -> Option<Vec<PathBuf>> {
+    let mut gitlinks = Vec::new();
+    let mut retained = 0u64;
+    let mut record = Vec::new();
+    loop {
+        record.clear();
+        if listing.read_until(0, &mut record).ok()? == 0 {
+            return Some(gitlinks);
+        }
+        if !record.starts_with(b"160000 ") {
+            continue;
+        }
+        // `<mode> <object> <stage>\t<path>\0`
+        let record = record.strip_suffix(b"\0")?;
+        let tab = record.iter().position(|byte| *byte == b'\t')?;
+        let path = &record[tab + 1..];
+        retained += path.len() as u64;
+        if path.is_empty() || retained >= MAX_FILTER_INVENTORY_BYTES {
+            return None;
+        }
+        gitlinks.push(path_from_git_bytes(path)?);
+    }
+}
+
+#[cfg(test)]
 fn filter_overrides_from_config(output: &[u8]) -> Option<Vec<OsString>> {
-    configured_filter_driver_names(output)
+    filter_overrides_from_names(configured_filter_driver_names(output))
+}
+
+fn filter_overrides_from_names(drivers: BTreeSet<Vec<u8>>) -> Option<Vec<OsString>> {
+    drivers
         .into_iter()
         .flat_map(|driver| {
             ["clean", "smudge", "process", "required"]
@@ -1003,6 +1178,29 @@ mod tests {
             started.elapsed()
         );
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn gitlink_scan_keeps_only_mode_160000_paths() {
+        let listing = b"100644 0123 0\tsrc/main.rs\0\
+                        160000 4567 0\tvendor/lib\0\
+                        120000 89ab 0\tlink\0\
+                        160000 cdef 2\twith space/sub\0";
+        assert_eq!(
+            parse_gitlinks(&listing[..]),
+            Some(vec![
+                PathBuf::from("vendor/lib"),
+                PathBuf::from("with space/sub")
+            ])
+        );
+        assert_eq!(parse_gitlinks(&b""[..]), Some(Vec::new()));
+    }
+
+    /// A gitlink record the scan cannot read is not a complete inventory.
+    #[test]
+    fn malformed_gitlink_record_is_refused() {
+        assert_eq!(parse_gitlinks(&b"160000 4567 0 no-tab\0"[..]), None);
+        assert_eq!(parse_gitlinks(&b"160000 4567 0\t\0"[..]), None);
     }
 
     #[cfg(windows)]

@@ -579,3 +579,151 @@ fn head_state_reports_branch_and_head_commit() {
     git(repo, &["checkout", "-q", "--detach"]);
     assert_eq!(herdr_file_viewer::git::head_state(repo), (None, Some(oid)));
 }
+
+/// A repo committed with `file.txt` = `hello\n`, ready to be added as a submodule.
+#[cfg(unix)]
+fn submodule_source() -> TempDir {
+    let repo = TempDir::new();
+    git(repo.path(), &["init", "-q", "-b", "main"]);
+    git(repo.path(), &["config", "user.email", "t@example.com"]);
+    git(repo.path(), &["config", "user.name", "T"]);
+    fs::write(repo.path().join("file.txt"), "hello\n").unwrap();
+    git(repo.path(), &["add", "."]);
+    git(repo.path(), &["commit", "-q", "-m", "init"]);
+    repo
+}
+
+/// `git submodule add <source> <path>` in `repo`, then commit it.
+#[cfg(unix)]
+fn add_submodule(repo: &Path, source: &Path, path: &str) {
+    git(
+        repo,
+        &[
+            "-c",
+            "protocol.file.allow=always",
+            "submodule",
+            "add",
+            "-q",
+            source.to_str().unwrap(),
+            path,
+        ],
+    );
+    git(repo, &["commit", "-q", "-m", "add submodule"]);
+}
+
+/// Plant a filter driver in `checkout`'s OWN repository config and info/attributes (neither is
+/// visible to the superproject's config), then make `file.txt` stat-dirty with the same size so
+/// git must run the clean filter to compare its content. Returns the marker the payload creates.
+#[cfg(unix)]
+fn plant_submodule_filter(checkout: &Path, scratch: &Path) -> PathBuf {
+    use std::os::unix::fs::PermissionsExt;
+    let marker = scratch.join("PWNED");
+    let script = scratch.join("payload.sh");
+    fs::write(
+        &script,
+        format!("#!/bin/sh\ntouch '{}'\ncat\n", marker.display()),
+    )
+    .unwrap();
+    fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).unwrap();
+    let payload = script.to_str().unwrap();
+    git(checkout, &["config", "filter.evil.process", payload]);
+    git(checkout, &["config", "filter.evil.clean", payload]);
+    let attributes = PathBuf::from(git(
+        checkout,
+        &[
+            "rev-parse",
+            "--path-format=absolute",
+            "--git-path",
+            "info/attributes",
+        ],
+    ));
+    fs::create_dir_all(attributes.parent().unwrap()).unwrap();
+    fs::write(&attributes, "* filter=evil\n").unwrap();
+
+    // Same size, newer mtime: the index stat check fails, so git compares content and that
+    // comparison runs the clean filter. An exact stat match would skip the filter entirely.
+    let file = checkout.join("file.txt");
+    fs::write(&file, "jello\n").unwrap();
+    fs::File::options()
+        .write(true)
+        .open(&file)
+        .unwrap()
+        .set_modified(std::time::SystemTime::now() + std::time::Duration::from_secs(5))
+        .unwrap();
+    marker
+}
+
+/// The superproject's own config names no filter, so inventorying only its `filter.*` keys
+/// leaves the submodule's driver live: `git status` / `git diff` spawn `git status` inside each
+/// populated submodule to detect `-dirty`, and that child reads the submodule's config and
+/// `$GIT_DIR/info/attributes` (which `--attr-source` does not replace). The dirty submodule must
+/// still be reported exactly as before.
+#[cfg(unix)]
+#[test]
+fn submodule_filter_driver_is_not_executed() {
+    let sub = submodule_source();
+    let super_repo = make_repo();
+    add_submodule(super_repo.path(), sub.path(), "sub");
+    let scratch = TempDir::new();
+    let marker = plant_submodule_filter(&super_repo.path().join("sub"), scratch.path());
+
+    let statuses = status(super_repo.path());
+    let rendered = diff_directory(super_repo.path(), Path::new(""), Baseline::Head, None);
+
+    assert!(
+        !marker.exists(),
+        "a filter driver configured inside a submodule must not run"
+    );
+    assert_eq!(
+        statuses.get(Path::new("sub")),
+        Some(&Status::Modified),
+        "a dirty submodule is still reported modified: {statuses:?}"
+    );
+    assert!(
+        rendered.contains("-dirty"),
+        "the gitlink diff still carries the -dirty suffix: {rendered}"
+    );
+}
+
+/// The same vector one level down: the superproject's `git status` spawns one in `mid`, which
+/// spawns one in `mid/inner`, whose own config carries the filter.
+#[cfg(unix)]
+#[test]
+fn nested_submodule_filter_driver_is_not_executed() {
+    let inner = submodule_source();
+    let mid = submodule_source();
+    add_submodule(mid.path(), inner.path(), "inner");
+    let super_repo = make_repo();
+    add_submodule(super_repo.path(), mid.path(), "mid");
+    git(
+        super_repo.path(),
+        &[
+            "-c",
+            "protocol.file.allow=always",
+            "submodule",
+            "update",
+            "-q",
+            "--init",
+            "--recursive",
+        ],
+    );
+    let scratch = TempDir::new();
+    let marker = plant_submodule_filter(&super_repo.path().join("mid/inner"), scratch.path());
+
+    let statuses = status(super_repo.path());
+    let rendered = diff_directory(super_repo.path(), Path::new(""), Baseline::Head, None);
+
+    assert!(
+        !marker.exists(),
+        "a filter driver configured inside a nested submodule must not run"
+    );
+    assert_eq!(
+        statuses.get(Path::new("mid")),
+        Some(&Status::Modified),
+        "a submodule with a dirty nested submodule is still reported modified: {statuses:?}"
+    );
+    assert!(
+        rendered.contains("-dirty"),
+        "the gitlink diff still carries the -dirty suffix: {rendered}"
+    );
+}
