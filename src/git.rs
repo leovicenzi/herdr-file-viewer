@@ -441,10 +441,11 @@ const FILTER_INVENTORY_TIMEOUT: Duration = Duration::from_secs(2);
 
 /// How long a whole recursive inventory may take. Each repository's reads are bounded by
 /// [`FILTER_INVENTORY_TIMEOUT`]; this caps their sum. The work grows with the number of populated
-/// submodules (a 200-submodule superproject needs well under a second), so a flat per-read budget
-/// would refuse a large legitimate superproject, while a tree of stalling repositories still ends
-/// in a refusal here.
-const SUBMODULE_INVENTORY_TOTAL_TIMEOUT: Duration = Duration::from_secs(30);
+/// submodules (about 1.1s for a 200-submodule superproject, so this covers roughly 1800), so a
+/// flat per-read budget would refuse a large legitimate superproject. Kept well short of a long
+/// stall: every slow-but-successful read a repository plants (even in submodules git itself
+/// skips) is paid in full until this budget ends in a refusal.
+const SUBMODULE_INVENTORY_TOTAL_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Largest config-key listing accepted from the inventory. A truncated read is incomplete, so
 /// it is refused rather than turned into a partial override list.
@@ -582,14 +583,60 @@ fn submodule_filter_drivers(
         failed: false,
     });
     let wake = Condvar::new();
-    std::thread::scope(|scope| {
-        for _ in 0..SUBMODULE_INVENTORY_PARALLELISM {
-            scope.spawn(|| inventory_worker(&queue, &wake, per_read, total_deadline));
+    let workers_finished = std::thread::scope(|scope| {
+        let workers: Vec<_> = (0..SUBMODULE_INVENTORY_PARALLELISM)
+            .map(|_| {
+                std::thread::Builder::new()
+                    .spawn_scoped(scope, || {
+                        inventory_worker(&queue, &wake, per_read, total_deadline)
+                    })
+                    .ok()
+            })
+            .collect();
+        if workers.iter().any(Option::is_none) {
+            // Too few workers is not a reason to run short: stop the ones that did start.
+            fail_inventory(&queue, &wake);
         }
+        // Join every worker before deciding: a panicked worker joined here is a refusal, not a
+        // panic out of this scope into the caller.
+        let joined: Vec<bool> = workers
+            .into_iter()
+            .map(|worker| worker.is_some_and(|worker| worker.join().is_ok()))
+            .collect();
+        joined.into_iter().all(|ok| ok)
     });
     let queue = queue.into_inner().ok()?;
-    (!queue.failed).then_some(queue.drivers)
+    (workers_finished && !queue.failed).then_some(queue.drivers)
 }
+
+/// Mark the inventory incomplete and wake every waiting worker so it stops.
+fn fail_inventory(queue: &Mutex<SubmoduleQueue>, wake: &Condvar) {
+    queue
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .failed = true;
+    wake.notify_all();
+}
+
+/// A checkout a worker has taken from the queue. If the worker unwinds before reporting it, the
+/// inventory fails and the other workers are woken, rather than waiting on it forever.
+struct ClaimedCheckout<'a> {
+    queue: &'a Mutex<SubmoduleQueue>,
+    wake: &'a Condvar,
+}
+
+impl Drop for ClaimedCheckout<'_> {
+    fn drop(&mut self) {
+        if std::thread::panicking() {
+            fail_inventory(self.queue, self.wake);
+        }
+    }
+}
+
+/// A checkout with this name makes its inventory worker panic, so a test can drive the unwind
+/// path that no real repository reaches on demand.
+#[cfg(test)]
+const PANICKING_CHECKOUT_FOR_TESTS: &str = "hfv-inventory-worker-panics";
 
 /// Shared state of a recursive inventory. A work queue rather than per-level batches, so one
 /// slow repository never leaves the other workers idle.
@@ -626,12 +673,26 @@ fn inventory_worker(
                 if state.in_flight == 0 {
                     return;
                 }
-                state = match wake.wait(state) {
-                    Ok(state) => state,
+                // Bounded even if a claimed checkout is never reported: past the total budget
+                // the inventory is incomplete.
+                let now = Instant::now();
+                if now >= total_deadline {
+                    state.failed = true;
+                    drop(state);
+                    wake.notify_all();
+                    return;
+                }
+                state = match wake.wait_timeout(state, total_deadline - now) {
+                    Ok((state, _)) => state,
                     Err(_) => return,
                 };
             }
         };
+        let _claim = ClaimedCheckout { queue, wake };
+        #[cfg(test)]
+        if checkout.file_name() == Some(std::ffi::OsStr::new(PANICKING_CHECKOUT_FOR_TESTS)) {
+            panic!("injected inventory worker panic");
+        }
         let inventory = if depth > MAX_SUBMODULE_DEPTH {
             None
         } else {
@@ -828,9 +889,14 @@ fn spawn_inventory_reader<T: Send + 'static>(
         return None;
     };
     let (sender, output) = mpsc::channel();
-    std::thread::spawn(move || {
+    // A thread the OS cannot create is an unavailable inventory, not a panic.
+    let reader = std::thread::Builder::new().spawn(move || {
         let _ = sender.send(read(stdout));
     });
+    if reader.is_err() {
+        let _ = crate::proc::terminate_and_reap(&mut child);
+        return None;
+    }
     Some(InventoryReader { child, output })
 }
 
@@ -1538,7 +1604,7 @@ mod tests {
             "the per-read budget, not the much larger total, bounds a stalled include"
         );
         // The included fifo never returns. 2s is 5x the two 200ms reads — enough for a loaded
-        // runner, still far below an unbounded wait or the 30s total budget. See AGENTS.md, "Tests prove things
+        // runner, still far below an unbounded wait or the 10s total budget. See AGENTS.md, "Tests prove things
         // deterministically".
         assert!(
             started.elapsed() < Duration::from_secs(2),
@@ -1571,6 +1637,68 @@ mod tests {
     fn malformed_gitlink_record_is_refused() {
         assert_eq!(parse_gitlinks(&b"160000 4567 0 no-tab\0"[..]), None);
         assert_eq!(parse_gitlinks(&b"160000 4567 0\t\0"[..]), None);
+    }
+
+    /// A worker that panics after taking a checkout from the queue never reports it. The others
+    /// must not wait on it forever, and the inventory must come back incomplete (a refusal), not
+    /// hang the operation or unwind into it.
+    #[test]
+    fn panicking_inventory_worker_refuses_instead_of_hanging() {
+        let root = std::env::temp_dir().join(format!(
+            "hfv-worker-panic-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        let git = |dir: &Path, args: &[&str]| {
+            let ok = Command::new("git")
+                .arg("-C")
+                .arg(dir)
+                .args(["-c", "user.email=t@example.com", "-c", "user.name=T"])
+                .args(["-c", "protocol.file.allow=always"])
+                .args(args)
+                .output()
+                .expect("git")
+                .status
+                .success();
+            assert!(ok, "git {args:?}");
+        };
+        let source = root.join("source");
+        let superproject = root.join("super");
+        std::fs::create_dir_all(&source).unwrap();
+        std::fs::create_dir_all(&superproject).unwrap();
+        git(&source, &["init", "-q"]);
+        std::fs::write(source.join("file.txt"), "hello\n").unwrap();
+        git(&source, &["add", "."]);
+        git(&source, &["commit", "-q", "-m", "init"]);
+        git(&superproject, &["init", "-q"]);
+        let source = source.to_str().unwrap();
+        // Several healthy submodules keep other workers busy, then idle and waiting, while the
+        // panicking one is in flight.
+        for name in ["a", "b", "c", PANICKING_CHECKOUT_FOR_TESTS] {
+            git(&superproject, &["submodule", "add", "-q", source, name]);
+        }
+
+        let (sender, receiver) = mpsc::channel();
+        let target = superproject.clone();
+        std::thread::spawn(move || {
+            let _ = sender.send(submodule_filter_drivers(
+                &target,
+                None,
+                FILTER_INVENTORY_TIMEOUT,
+                SUBMODULE_INVENTORY_TOTAL_TIMEOUT,
+            ));
+        });
+        // Without the guard the remaining workers wait forever. 30s is 3x the total budget, so
+        // even the bounded-wait fallback alone fits; the guard returns at once.
+        let got = receiver.recv_timeout(Duration::from_secs(30));
+        assert!(
+            matches!(got, Ok(None)),
+            "a panicked worker is an incomplete inventory, returned promptly: {got:?}"
+        );
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[cfg(windows)]
