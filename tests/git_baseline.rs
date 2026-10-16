@@ -4,10 +4,8 @@
 mod common;
 
 use common::{TempDir, git};
-#[cfg(unix)]
-use herdr_file_viewer::git::status;
 use herdr_file_viewer::git::{
-    Baseline, Status, changed_set, default_baseline, diff, diff_directory,
+    Baseline, Status, changed_set, default_baseline, diff, diff_directory, status,
 };
 use herdr_file_viewer::root::Resolved;
 use std::fs;
@@ -646,7 +644,6 @@ fn head_state_reports_branch_and_head_commit() {
 }
 
 /// A repo committed with `file.txt` = `hello\n`, ready to be added as a submodule.
-#[cfg(unix)]
 fn submodule_source() -> TempDir {
     let repo = TempDir::new();
     git(repo.path(), &["init", "-q", "-b", "main"]);
@@ -659,7 +656,6 @@ fn submodule_source() -> TempDir {
 }
 
 /// `git submodule add <source> <path>` in `repo`, then commit it.
-#[cfg(unix)]
 fn add_submodule(repo: &Path, source: &Path, path: &str) {
     git(
         repo,
@@ -791,4 +787,115 @@ fn nested_submodule_filter_driver_is_not_executed() {
         rendered.contains("-dirty"),
         "the gitlink diff still carries the -dirty suffix: {rendered}"
     );
+}
+
+/// A non-recursive clone leaves a submodule's directory empty. Git does not check it for changes,
+/// and neither may the filter inventory: inventorying it would find the superproject instead and
+/// refuse every query.
+#[test]
+fn unpopulated_submodule_keeps_superproject_git_features() {
+    let sub = submodule_source();
+    let super_repo = make_repo();
+    add_submodule(super_repo.path(), sub.path(), "sub");
+    git(
+        super_repo.path(),
+        &["submodule", "deinit", "-q", "-f", "sub"],
+    );
+    assert!(
+        !super_repo.path().join("sub/.git").exists(),
+        "sub is unpopulated"
+    );
+    fs::write(super_repo.path().join("seed.txt"), "edited\n").unwrap();
+
+    let statuses = status(super_repo.path());
+    let rendered = diff_directory(super_repo.path(), Path::new(""), Baseline::Head, None);
+
+    assert_eq!(
+        statuses.get(Path::new("seed.txt")),
+        Some(&Status::Modified),
+        "{statuses:?}"
+    );
+    assert!(rendered.contains("+edited"), "{rendered}");
+}
+
+/// A clean, populated submodule is inventoried and accepted on every platform (its reported
+/// toplevel canonicalizes to the checkout), so the superproject keeps its git features.
+#[test]
+fn populated_submodule_keeps_superproject_git_features() {
+    let sub = submodule_source();
+    let super_repo = make_repo();
+    add_submodule(super_repo.path(), sub.path(), "sub");
+    fs::write(super_repo.path().join("seed.txt"), "edited\n").unwrap();
+
+    let statuses = status(super_repo.path());
+
+    assert_eq!(
+        statuses.get(Path::new("seed.txt")),
+        Some(&Status::Modified),
+        "an empty map here is a refused query: {statuses:?}"
+    );
+    assert_eq!(
+        statuses.get(Path::new("sub")),
+        None,
+        "the submodule is clean"
+    );
+}
+
+/// A submodule whose `core.worktree` names another directory runs its nested status there, in a
+/// tree the inventory never saw. That is not a complete inventory, so the query is refused.
+#[test]
+fn submodule_with_a_foreign_worktree_refuses_queries() {
+    let sub = submodule_source();
+    let super_repo = make_repo();
+    add_submodule(super_repo.path(), sub.path(), "sub");
+    let elsewhere = TempDir::new();
+    git(
+        &super_repo.path().join("sub"),
+        &[
+            "config",
+            "core.worktree",
+            elsewhere.path().to_str().unwrap(),
+        ],
+    );
+    fs::write(super_repo.path().join("seed.txt"), "edited\n").unwrap();
+
+    // Control: git itself still answers, so an empty result below is the viewer's refusal.
+    let raw = git(super_repo.path(), &["status", "--porcelain"]);
+    assert!(raw.contains("seed.txt"), "git status still works: {raw}");
+
+    assert!(status(super_repo.path()).is_empty(), "the query is refused");
+}
+
+/// The toplevel check reads git's path as raw bytes, like every other path here, so a checkout
+/// under a non-UTF-8 directory still matches itself. APFS rejects such names; there the test
+/// has nothing to prove and returns early.
+#[cfg(unix)]
+#[test]
+fn submodule_under_a_non_utf8_path_keeps_git_features() {
+    use std::os::unix::ffi::OsStrExt;
+    let sub = submodule_source();
+    let holder = TempDir::new();
+    let super_path = holder.path().join(std::ffi::OsStr::from_bytes(b"caf\xe9"));
+    if fs::create_dir(&super_path).is_err() {
+        eprintln!("skipped: this filesystem rejects non-UTF-8 names");
+        return;
+    }
+    git(&super_path, &["init", "-q", "-b", "main"]);
+    git(&super_path, &["config", "user.email", "t@example.com"]);
+    git(&super_path, &["config", "user.name", "T"]);
+    fs::write(super_path.join("seed.txt"), "1\n").unwrap();
+    git(&super_path, &["add", "."]);
+    git(&super_path, &["commit", "-q", "-m", "init"]);
+    add_submodule(&super_path, sub.path(), "sub");
+    fs::write(super_path.join("sub/file.txt"), "hello\ndirty\n").unwrap();
+
+    let statuses = status(&super_path);
+    let rendered = diff_directory(&super_path, Path::new(""), Baseline::Head, None);
+
+    assert_eq!(
+        statuses.get(Path::new("sub")),
+        Some(&Status::Modified),
+        "an empty map here is a refused query: {statuses:?}"
+    );
+    assert!(rendered.contains("-dirty"), "{rendered}");
 }

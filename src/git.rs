@@ -16,13 +16,14 @@
 //! *compute* it.
 
 use crate::root::Resolved;
-use std::collections::{BTreeMap, BTreeSet};
+use std::cell::OnceCell;
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::ffi::OsString;
 use std::io::Read;
 use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::sync::OnceLock;
 use std::sync::mpsc;
+use std::sync::{Condvar, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 /// git's well-known empty-tree object — the baseline for an unborn repo's first files.
@@ -74,9 +75,18 @@ pub enum Baseline {
 
 /// Per-file working-tree status, keyed by repo-root-relative path.
 pub fn status(repo_root: &Path) -> BTreeMap<PathBuf, Status> {
+    status_in(&Operation::new(repo_root))
+}
+
+fn status_in(op: &Operation) -> BTreeMap<PathBuf, Status> {
     // -uall lists each untracked file individually (not a collapsed `dir/`); -z gives
-    // verbatim NUL-delimited paths (no quoting/escaping to misparse).
-    match run_bytes(repo_root, &["status", "--porcelain=v1", "-z", "-uall"]) {
+    // verbatim NUL-delimited paths (no quoting/escaping to misparse). `status` checks every
+    // populated submodule for changes, so it needs the submodule inventory.
+    match run_bytes(
+        op,
+        Reach::Submodules,
+        &["status", "--porcelain=v1", "-z", "-uall"],
+    ) {
         // Not a repo / git unavailable → empty (AC-26).
         None => BTreeMap::new(),
         Some(out) => parse_porcelain_status(&out),
@@ -165,9 +175,10 @@ pub fn default_baseline(resolved: &Resolved) -> Baseline {
     let Some(repo) = resolved.repo_root.as_deref() else {
         return Baseline::Head;
     };
+    let op = Operation::new(repo);
     match (
-        resolve_base_branch(repo, resolved.base_branch.as_deref()),
-        current_branch(repo),
+        resolve_base_branch(&op, resolved.base_branch.as_deref()),
+        current_branch_in(&op),
     ) {
         // On a branch other than the base/default branch → compare to the base (AC-14).
         (Some(base), Some(cur)) if base != cur => Baseline::Base,
@@ -186,19 +197,22 @@ pub fn changed_set(
     baseline: Baseline,
     base_hint: Option<&str>,
 ) -> BTreeMap<PathBuf, Status> {
+    let op = Operation::new(repo_root);
     match baseline {
         // Uncommitted changes vs HEAD — exactly the working-tree status.
-        Baseline::Head => status(repo_root),
+        Baseline::Head => status_in(&op),
         Baseline::Base => {
             // No resolvable base → degrade to a HEAD comparison (consistent with diff()).
-            let Some(fork) = base_fork_point(repo_root, base_hint) else {
-                return status(repo_root);
+            let Some(fork) = base_fork_point(&op, base_hint) else {
+                return status_in(&op);
             };
             // `git diff <fork>` compares the fork-point tree to the working tree, so it
-            // already includes committed-on-branch AND uncommitted tracked changes.
+            // already includes committed-on-branch AND uncommitted tracked changes, and it checks
+            // populated submodules for changes.
             let mut map = BTreeMap::new();
             if let Some(out) = run_bytes(
-                repo_root,
+                &op,
+                Reach::Submodules,
                 &[
                     "diff",
                     "--no-ext-diff",
@@ -211,7 +225,7 @@ pub fn changed_set(
                 map = parse_name_status(&out);
             }
             // Untracked files aren't in `git diff` but are part of the body of work.
-            for (path, s) in status(repo_root) {
+            for (path, s) in status_in(&op) {
                 if s == Status::Untracked {
                     map.entry(path).or_insert(Status::Untracked);
                 }
@@ -240,22 +254,19 @@ pub fn diff(
     // so every unchanged line is emitted as context around the changes; the default (3 lines)
     // gives the compact hunks-only diff. The render layer still bounds the result (AC-13).
     let unified = full_context.then_some(FULL_CONTEXT);
+    let op = Operation::new(repo_root);
     // The path is appended as a raw OsStr arg (not lossy UTF-8) so non-ASCII / non-UTF-8
     // filenames reach git verbatim and their diffs are not silently empty.
-    if is_untracked(repo_root, path) {
-        return diff_untracked(repo_root, path, unified);
+    if is_untracked(&op, path) {
+        return diff_untracked(&op, path, unified);
     }
-    let against = match baseline {
-        Baseline::Head => head_or_empty_tree(repo_root),
-        Baseline::Base => {
-            base_fork_point(repo_root, base_hint).unwrap_or_else(|| head_or_empty_tree(repo_root))
-        }
-    };
+    let against = baseline_commit(&op, baseline, base_hint);
     let mut args = vec!["diff", "--no-ext-diff", "--no-textconv", "--no-color"];
     args.extend(unified);
     args.push(&against);
     args.push("--");
-    let mut cmd = git_command(repo_root, &args);
+    // A commit-vs-worktree diff checks a submodule path for changes.
+    let mut cmd = op.command(Reach::Submodules, &args);
     cmd.arg(path);
     capture_stdout(cmd)
 }
@@ -265,8 +276,8 @@ pub fn diff(
 /// probe that the general [`diff`] must run first — one `git` process, not two. `unified` is the
 /// optional full-context window. Read-only, and the same root-confinement guard [`diff`] applies
 /// (AC-N5) so a status-derived path can never resolve outside the tree.
-fn diff_untracked(repo_root: &Path, path: &Path, unified: Option<&str>) -> String {
-    if !is_within_root(repo_root, path) {
+fn diff_untracked(op: &Operation, path: &Path, unified: Option<&str>) -> String {
+    if !is_within_root(op.repo_root, path) {
         return String::new();
     }
     let mut args = vec![
@@ -279,7 +290,8 @@ fn diff_untracked(repo_root: &Path, path: &Path, unified: Option<&str>) -> Strin
     args.extend(unified);
     args.push("--");
     args.push(NULL_DEVICE);
-    let mut cmd = git_command(repo_root, &args);
+    // `--no-index` compares two paths outside any index; it never checks a submodule.
+    let mut cmd = op.command(Reach::Repository, &args);
     cmd.arg(path);
     capture_stdout(cmd)
 }
@@ -301,17 +313,15 @@ pub fn diff_directory(
     if !rel_dir.as_os_str().is_empty() && !is_within_root(repo_root, rel_dir) {
         return String::new();
     }
-    let against = match baseline {
-        Baseline::Head => head_or_empty_tree(repo_root),
-        Baseline::Base => {
-            base_fork_point(repo_root, base_hint).unwrap_or_else(|| head_or_empty_tree(repo_root))
-        }
-    };
+    let op = Operation::new(repo_root);
+    let against = baseline_commit(&op, baseline, base_hint);
     // Pathspec only when scoped to a subdir; empty pathspec = whole tree.
     let mut args = vec!["diff", "--no-ext-diff", "--no-textconv", "--no-color"];
     args.push(&against);
     args.push("--");
-    let mut cmd = git_command(repo_root, &args);
+    // A commit-vs-worktree diff checks populated submodules for changes. This operation's
+    // submodule inventory then also covers its status and every untracked-file diff below.
+    let mut cmd = op.command(Reach::Submodules, &args);
     if !rel_dir.as_os_str().is_empty() {
         cmd.arg(rel_dir);
     }
@@ -333,7 +343,7 @@ pub fn diff_directory(
     // are the lexicographically-first ones (deterministic), not an arbitrary subset.
     let cap = MAX_DIFF_BYTES as usize;
     let mut spawned = 0usize;
-    for (path, state) in status(repo_root) {
+    for (path, state) in status_in(&op) {
         if cap.saturating_sub(output.len()) == 0 || spawned >= MAX_UNTRACKED_DIFF_FILES {
             break;
         }
@@ -343,7 +353,7 @@ pub fn diff_directory(
             continue;
         }
         spawned += 1;
-        let file_diff = diff_untracked(repo_root, &path, None);
+        let file_diff = diff_untracked(&op, &path, None);
         if file_diff.is_empty() {
             continue;
         }
@@ -421,10 +431,17 @@ fn configured_filter_driver_names(out: &[u8]) -> BTreeSet<Vec<u8>> {
     drivers
 }
 
-/// How long the filter-name inventory may block. An included config path that never returns
-/// (for example a fifo) must not freeze every later git query; past this budget the inventory
-/// is unavailable and the caller fails closed.
+/// How long one inventory read may block. An included config path that never returns (for
+/// example a fifo) must not freeze every later git query; past this budget the inventory is
+/// unavailable and the caller fails closed.
 const FILTER_INVENTORY_TIMEOUT: Duration = Duration::from_secs(2);
+
+/// How long a whole recursive inventory may take. Each repository's reads are bounded by
+/// [`FILTER_INVENTORY_TIMEOUT`]; this caps their sum. The work grows with the number of populated
+/// submodules (a 200-submodule superproject needs well under a second), so a flat per-read budget
+/// would refuse a large legitimate superproject, while a tree of stalling repositories still ends
+/// in a refusal here.
+const SUBMODULE_INVENTORY_TOTAL_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Largest config-key listing accepted from the inventory. A truncated read is incomplete, so
 /// it is refused rather than turned into a partial override list.
@@ -434,60 +451,203 @@ const MAX_FILTER_INVENTORY_BYTES: u64 = 1024 * 1024;
 /// into an enclosing worktree) makes the inventory unavailable, so the query is refused.
 const MAX_SUBMODULE_DEPTH: usize = 8;
 
-/// Submodule repositories inventoried at once. Each inventory runs up to three short-lived git
+/// Most populated submodules one inventory visits; more is refused. Far above real
+/// superprojects, it bounds the git processes a hostile index can make one query start.
+const MAX_INVENTORIED_SUBMODULES: usize = 10_000;
+
+/// Submodule repositories inventoried at once. Each inventory runs three short-lived git
 /// processes, so this bounds concurrent children (and their pipes) for a many-submodule repo.
 const SUBMODULE_INVENTORY_PARALLELISM: usize = 8;
 
-/// Read filter driver names without consulting attributes or invoking filters, then return
-/// command-line overrides that make every configured filter a non-required no-op. Git's documented
-/// behavior for a filter without a command is pass-through; in git 2.39's `convert.c`, empty
-/// clean/process strings are likewise rejected by the `*cmd` check before any child can spawn.
-///
-/// The names come from the opened repository AND every populated submodule below it, recursively.
-/// `git status` / `git diff` spawn `git status` inside each populated submodule to detect a dirty
-/// one; that child inherits these `-c` overrides through `GIT_CONFIG_PARAMETERS`, but it reads the
-/// submodule's own config and `$GIT_DIR/info/attributes`, so a driver named only there would run
-/// unless it is neutralized here too.
-fn configured_filter_overrides(repo_root: &Path) -> Option<Vec<OsString>> {
-    configured_filter_overrides_within(repo_root, FILTER_INVENTORY_TIMEOUT)
+/// How far a git command can reach, which decides whose filter drivers its overrides must cover.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Reach {
+    /// The opened repository only, for commands that never check a submodule for changes
+    /// (`rev-parse`, `merge-base`, `ls-files --error-unmatch`, `worktree list`,
+    /// `diff --no-index`). Their overrides still cover the repository's own drivers: a
+    /// `--no-index` diff applies filters selected by `$GIT_DIR/info/attributes`.
+    Repository,
+    /// The repository and every populated submodule below it, for `status` and for a diff that
+    /// compares the worktree (`git diff <commit>`). Both spawn `git status` inside each populated
+    /// submodule to detect a dirty one. That child inherits the `-c` overrides through
+    /// `GIT_CONFIG_PARAMETERS`, but it reads the submodule's own config and
+    /// `$GIT_DIR/info/attributes`, so a driver named only there must be neutralized too.
+    Submodules,
 }
 
-fn configured_filter_overrides_within(
-    repo_root: &Path,
-    timeout: Duration,
-) -> Option<Vec<OsString>> {
-    // One deadline covers the whole inventory: every repository, every child and reader thread.
-    let deadline = Instant::now() + timeout;
-    let mut drivers = BTreeSet::new();
-    let mut level = vec![repo_root.to_path_buf()];
-    for depth in 0.. {
-        if level.is_empty() {
-            return filter_overrides_from_names(drivers);
+/// Builds the hardened commands of ONE public git operation (a status, a diff, a root
+/// resolution). Each [`Reach`]'s filter inventory runs at most once per operation, on first use,
+/// and is dropped with it: nothing is kept across operations, so every user action reads the
+/// repository's configuration afresh.
+pub(crate) struct Operation<'a> {
+    repo_root: &'a Path,
+    repository_drivers: OnceCell<Option<BTreeSet<Vec<u8>>>>,
+    submodule_drivers: OnceCell<Option<BTreeSet<Vec<u8>>>>,
+}
+
+impl<'a> Operation<'a> {
+    pub(crate) fn new(repo_root: &'a Path) -> Self {
+        Self {
+            repo_root,
+            repository_drivers: OnceCell::new(),
+            submodule_drivers: OnceCell::new(),
         }
-        if depth > MAX_SUBMODULE_DEPTH {
-            return None;
-        }
-        let mut next = Vec::new();
-        for batch in level.chunks(SUBMODULE_INVENTORY_PARALLELISM) {
-            let inventories: Vec<Option<RepoInventory>> = std::thread::scope(|scope| {
-                let workers: Vec<_> = batch
-                    .iter()
-                    .map(|dir| scope.spawn(move || inventory_repo(dir, depth > 0, deadline)))
-                    .collect();
-                workers
-                    .into_iter()
-                    .map(|worker| worker.join().ok().flatten())
-                    .collect()
-            });
-            for inventory in inventories {
-                let inventory = inventory?;
-                drivers.extend(inventory.drivers);
-                next.extend(inventory.populated_submodules);
-            }
-        }
-        level = next;
     }
-    unreachable!("the depth loop returns")
+
+    /// A `git -C <repo_root> <args>` command hardened as [`git_command_with`] describes, with
+    /// every filter driver `reach` can run neutralized. When that inventory is unavailable the
+    /// command is one git refuses before touching the repository.
+    pub(crate) fn command(&self, reach: Reach, args: &[&str]) -> Command {
+        let drivers = match reach {
+            Reach::Submodules => self.submodule_drivers.get_or_init(|| {
+                // Reuse this operation's repository read rather than reading that config twice.
+                match self.repository_drivers.get() {
+                    Some(None) => None,
+                    Some(Some(known)) => submodule_filter_drivers(
+                        self.repo_root,
+                        Some(known.clone()),
+                        FILTER_INVENTORY_TIMEOUT,
+                        SUBMODULE_INVENTORY_TOTAL_TIMEOUT,
+                    ),
+                    None => submodule_filter_drivers(
+                        self.repo_root,
+                        None,
+                        FILTER_INVENTORY_TIMEOUT,
+                        SUBMODULE_INVENTORY_TOTAL_TIMEOUT,
+                    ),
+                }
+            }),
+            // The submodule inventory is a superset, so reuse it when this operation has one.
+            Reach::Repository => match self.submodule_drivers.get() {
+                Some(all) => all,
+                None => self.repository_drivers.get_or_init(|| {
+                    repository_filter_drivers(self.repo_root, FILTER_INVENTORY_TIMEOUT)
+                }),
+            },
+        };
+        let Some(overrides) = drivers.as_ref().and_then(filter_overrides_from_names) else {
+            // A global option that git cannot recognize fails before repository setup or command
+            // dispatch. This keeps the existing degrade-to-neutral behavior without risking a
+            // query whose executable-filter inventory could not be established.
+            let mut refused = base_git_command(self.repo_root);
+            refused.arg("--herdr-refuse-unverified-filter-config");
+            return refused;
+        };
+        git_command_with(self.repo_root, args, attr_source_supported(), &overrides)
+    }
+}
+
+/// Filter driver names configured for `repo_root` itself, read without consulting attributes
+/// or invoking filters. Git's documented behavior for a filter without a command is
+/// pass-through; in git 2.39's `convert.c`, empty clean/process strings are likewise rejected by
+/// the `*cmd` check before any child can spawn.
+fn repository_filter_drivers(repo_root: &Path, timeout: Duration) -> Option<BTreeSet<Vec<u8>>> {
+    let config = spawn_inventory_reader(repo_root, &FILTER_CONFIG_ARGS, read_capped)?;
+    config_drivers(config.finish(Instant::now() + timeout)?)
+}
+
+/// Filter driver names configured for `repo_root` and for every populated submodule below it,
+/// recursively. `known` is this operation's already-read repository set, which skips re-reading
+/// that config. Each repository's reads are bounded by `per_read`, the whole walk by `total`.
+fn submodule_filter_drivers(
+    repo_root: &Path,
+    known: Option<BTreeSet<Vec<u8>>>,
+    per_read: Duration,
+    total: Duration,
+) -> Option<BTreeSet<Vec<u8>>> {
+    let total_deadline = Instant::now() + total;
+    // The opened repository runs inline: one without submodules starts no worker threads.
+    let top = inventory_repo(repo_root, false, known, per_read, total_deadline)?;
+    if top.populated_submodules.is_empty() {
+        return Some(top.drivers);
+    }
+    if top.populated_submodules.len() > MAX_INVENTORIED_SUBMODULES {
+        return None;
+    }
+    let queue = Mutex::new(SubmoduleQueue {
+        visited: top.populated_submodules.len(),
+        pending: top
+            .populated_submodules
+            .into_iter()
+            .map(|checkout| (checkout, 1))
+            .collect(),
+        in_flight: 0,
+        drivers: top.drivers,
+        failed: false,
+    });
+    let wake = Condvar::new();
+    std::thread::scope(|scope| {
+        for _ in 0..SUBMODULE_INVENTORY_PARALLELISM {
+            scope.spawn(|| inventory_worker(&queue, &wake, per_read, total_deadline));
+        }
+    });
+    let queue = queue.into_inner().ok()?;
+    (!queue.failed).then_some(queue.drivers)
+}
+
+/// Shared state of a recursive inventory. A work queue rather than per-level batches, so one
+/// slow repository never leaves the other workers idle.
+struct SubmoduleQueue {
+    /// Checkouts still to inventory, with their nesting depth.
+    pending: VecDeque<(PathBuf, usize)>,
+    in_flight: usize,
+    /// Checkouts queued so far, against [`MAX_INVENTORIED_SUBMODULES`].
+    visited: usize,
+    drivers: BTreeSet<Vec<u8>>,
+    /// Any incomplete repository makes the whole inventory unavailable.
+    failed: bool,
+}
+
+/// Take checkouts from `queue` until it is drained or has failed, queueing the populated
+/// submodules each one registers.
+fn inventory_worker(
+    queue: &Mutex<SubmoduleQueue>,
+    wake: &Condvar,
+    per_read: Duration,
+    total_deadline: Instant,
+) {
+    loop {
+        let (checkout, depth) = {
+            let Ok(mut state) = queue.lock() else { return };
+            loop {
+                if state.failed {
+                    return;
+                }
+                if let Some(next) = state.pending.pop_front() {
+                    state.in_flight += 1;
+                    break next;
+                }
+                if state.in_flight == 0 {
+                    return;
+                }
+                state = match wake.wait(state) {
+                    Ok(state) => state,
+                    Err(_) => return,
+                };
+            }
+        };
+        let inventory = if depth > MAX_SUBMODULE_DEPTH {
+            None
+        } else {
+            inventory_repo(&checkout, true, None, per_read, total_deadline)
+        };
+        let Ok(mut state) = queue.lock() else { return };
+        state.in_flight -= 1;
+        match inventory {
+            Some(found)
+                if state.visited + found.populated_submodules.len()
+                    <= MAX_INVENTORIED_SUBMODULES =>
+            {
+                state.visited += found.populated_submodules.len();
+                state.drivers.extend(found.drivers);
+                let nested = found.populated_submodules.into_iter();
+                state.pending.extend(nested.map(|path| (path, depth + 1)));
+            }
+            _ => state.failed = true,
+        }
+        drop(state);
+        wake.notify_all();
+    }
 }
 
 /// One repository's share of the filter inventory.
@@ -497,28 +657,46 @@ struct RepoInventory {
     populated_submodules: Vec<PathBuf>,
 }
 
-/// Inventory `dir`'s configured filter driver names and populated submodules. Built-in
-/// `git config`, `git ls-files` and `git rev-parse` only: they read configuration and the index,
-/// never attributes, and never invoke filter drivers. The children run concurrently so the
-/// gitlink scan adds little to the config read it accompanies.
-fn inventory_repo(dir: &Path, is_submodule: bool, deadline: Instant) -> Option<RepoInventory> {
-    let config = spawn_inventory_reader(
-        dir,
-        &[
-            "config",
-            "--includes",
-            "--null",
-            "--name-only",
-            "--get-regexp",
-            r"^filter\.",
-        ],
-        read_capped,
-    )?;
+/// `git config` arguments that list every configured filter key, following includes.
+const FILTER_CONFIG_ARGS: [&str; 6] = [
+    "config",
+    "--includes",
+    "--null",
+    "--name-only",
+    "--get-regexp",
+    r"^filter\.",
+];
+
+/// Inventory `dir`'s configured filter driver names (unless `known` already holds them) and its
+/// populated submodules. Built-in `git config`, `git ls-files` and `git rev-parse` only: they
+/// read configuration and the index, never attributes, and never invoke filter drivers. The
+/// children run concurrently, each bounded by `per_read` and all by `total_deadline`.
+fn inventory_repo(
+    dir: &Path,
+    is_submodule: bool,
+    known: Option<BTreeSet<Vec<u8>>>,
+    per_read: Duration,
+    total_deadline: Instant,
+) -> Option<RepoInventory> {
+    let deadline = (Instant::now() + per_read).min(total_deadline);
+    if Instant::now() >= deadline {
+        return None;
+    }
+    let config = match known {
+        Some(_) => None,
+        None => Some(spawn_inventory_reader(
+            dir,
+            &FILTER_CONFIG_ARGS,
+            read_capped,
+        )?),
+    };
     // The index, not `.gitmodules`, is what git consults: a gitlink with no `.gitmodules` entry
     // is still checked for a dirty worktree.
     let gitlinks = spawn_inventory_reader(dir, &["ls-files", "--stage", "-z"], read_gitlinks)?;
     // A submodule's own `core.worktree` decides where its nested status runs. Follow it only when
-    // it is the checkout the superproject sees; anything else is not a complete inventory.
+    // it is the checkout the superproject sees; anything else is not a complete inventory. This
+    // stays a separate `rev-parse`: deriving the worktree from the config listing would
+    // re-implement git's `core.worktree` resolution, and it runs alongside the other two reads.
     let toplevel = if is_submodule {
         Some(spawn_inventory_reader(
             dir,
@@ -529,27 +707,21 @@ fn inventory_repo(dir: &Path, is_submodule: bool, deadline: Instant) -> Option<R
         None
     };
 
-    let (config_status, config_out) = config.finish(deadline)?;
-    let (gitlinks_status, gitlinks) = gitlinks.finish(deadline)?;
-    let toplevel = match toplevel {
-        Some(reader) => Some(reader.finish(deadline)?),
-        None => None,
+    let drivers = match (known, config) {
+        (Some(known), _) => known,
+        (None, Some(config)) => config_drivers(config.finish(deadline)?)?,
+        (None, None) => return None,
     };
-
-    // `git config --get-regexp` returns 1 for no matches. Every other failure is unsafe to
-    // interpret as "no filters": fail closed rather than running the requested repo query with
-    // an incomplete inventory.
-    let config_out = config_out?;
-    let no_matches = config_status.code() == Some(1) && config_out.is_empty();
-    if !(config_status.success() || no_matches) || !gitlinks_status.success() {
+    let (gitlinks_status, gitlinks) = gitlinks.finish(deadline)?;
+    if !gitlinks_status.success() {
         return None;
     }
-    if let Some((status, out)) = toplevel {
-        let out = out?;
-        let reported = std::str::from_utf8(&out).ok()?.strip_suffix('\n')?;
-        if !status.success()
-            || Path::new(reported).canonicalize().ok()? != dir.canonicalize().ok()?
-        {
+    if let Some(toplevel) = toplevel {
+        let (status, out) = toplevel.finish(deadline)?;
+        // Raw bytes, like every other path this module reads from git: a non-UTF-8 checkout
+        // path must still compare equal to itself.
+        let reported = path_from_git_bytes(out?.strip_suffix(b"\n")?)?;
+        if !status.success() || reported.canonicalize().ok()? != dir.canonicalize().ok()? {
             return None;
         }
     }
@@ -562,9 +734,20 @@ fn inventory_repo(dir: &Path, is_submodule: bool, deadline: Instant) -> Option<R
         .filter(|checkout| checkout.join(".git").exists())
         .collect();
     Some(RepoInventory {
-        drivers: configured_filter_driver_names(&config_out),
+        drivers,
         populated_submodules,
     })
+}
+
+/// Driver names from a finished `git config --get-regexp` read. It returns 1 for no matches.
+/// Every other failure is unsafe to interpret as "no filters": fail closed rather than running
+/// the requested repo query with an incomplete inventory.
+fn config_drivers(
+    (status, output): (std::process::ExitStatus, Option<Vec<u8>>),
+) -> Option<BTreeSet<Vec<u8>>> {
+    let output = output?;
+    let no_matches = status.code() == Some(1) && output.is_empty();
+    (status.success() || no_matches).then(|| configured_filter_driver_names(&output))
 }
 
 /// A spawned inventory child whose stdout is consumed on its own thread.
@@ -663,12 +846,12 @@ fn parse_gitlinks(mut listing: impl std::io::BufRead) -> Option<Vec<PathBuf>> {
 
 #[cfg(test)]
 fn filter_overrides_from_config(output: &[u8]) -> Option<Vec<OsString>> {
-    filter_overrides_from_names(configured_filter_driver_names(output))
+    filter_overrides_from_names(&configured_filter_driver_names(output))
 }
 
-fn filter_overrides_from_names(drivers: BTreeSet<Vec<u8>>) -> Option<Vec<OsString>> {
+fn filter_overrides_from_names(drivers: &BTreeSet<Vec<u8>>) -> Option<Vec<OsString>> {
     drivers
-        .into_iter()
+        .iter()
         .flat_map(|driver| {
             ["clean", "smudge", "process", "required"]
                 .into_iter()
@@ -678,7 +861,7 @@ fn filter_overrides_from_names(drivers: BTreeSet<Vec<u8>>) -> Option<Vec<OsStrin
                         return None;
                     }
                     let mut arg = b"filter.".to_vec();
-                    arg.extend_from_slice(&driver);
+                    arg.extend_from_slice(driver);
                     arg.push(b'.');
                     arg.extend_from_slice(field.as_bytes());
                     arg.push(b'=');
@@ -691,9 +874,10 @@ fn filter_overrides_from_names(drivers: BTreeSet<Vec<u8>>) -> Option<Vec<OsStrin
         .collect()
 }
 
-/// Start a git command with the environment and repository selection shared by the safe config
-/// inventory and every viewer query. The inventory runs only the built-in `git config`, which
-/// reads configuration but does not read attributes/index content or invoke filter drivers.
+/// Start a git command with the environment and repository selection shared by the safe filter
+/// inventory and every viewer query. The inventory runs only the built-ins `git config`,
+/// `git ls-files --stage` and `git rev-parse --show-toplevel`, which read configuration and the
+/// index but never attributes, and never invoke filter drivers.
 fn base_git_command(repo_root: &Path) -> Command {
     let mut cmd = Command::new("git");
     cmd.env("GIT_OPTIONAL_LOCKS", "0")
@@ -719,6 +903,13 @@ fn base_git_command(repo_root: &Path) -> Command {
     cmd
 }
 
+/// A `git -C <dir> <args>` command for a caller outside this module, as
+/// [`Operation::command`] builds it. Use an [`Operation`] instead when one action runs several
+/// commands, so the filter inventory runs once.
+pub(crate) fn git_command(repo_root: &Path, reach: Reach, args: &[&str]) -> Command {
+    Operation::new(repo_root).command(reach, args)
+}
+
 /// Build a `git -C <dir> <args>` command hardened for read-only use against an **untrusted**
 /// repository: `GIT_OPTIONAL_LOCKS=0` stops status/diff from writing the index (AC-N2);
 /// `core.fsmonitor` / `core.hooksPath` are neutralized; `diff.submodule=short` keeps a nested
@@ -728,21 +919,8 @@ fn base_git_command(repo_root: &Path) -> Command {
 ///
 /// `--attr-source` still pins worktree attributes to the empty tree when available. Older git
 /// omits that unsupported flag. Filter overrides also cover attribute sources the flag does not
-/// replace, including `$GIT_DIR/info/attributes`.
-pub(crate) fn git_command(repo_root: &Path, args: &[&str]) -> Command {
-    let Some(filter_overrides) = configured_filter_overrides(repo_root) else {
-        // A global option that git cannot recognize fails before repository setup or command
-        // dispatch. This keeps the existing degrade-to-neutral behavior without risking a query
-        // whose executable-filter inventory could not be established.
-        let mut refused = base_git_command(repo_root);
-        refused.arg("--herdr-refuse-unverified-filter-config");
-        return refused;
-    };
-    git_command_with(repo_root, args, attr_source_supported(), &filter_overrides)
-}
-
-/// Shared builder with explicit feature and filter inputs so unit tests do not depend on the
-/// runner's git version or repository configuration.
+/// replace, including `$GIT_DIR/info/attributes`. Explicit feature and filter inputs keep unit
+/// tests independent of the runner's git version and repository configuration.
 fn git_command_with(
     repo_root: &Path,
     args: &[&str],
@@ -789,26 +967,35 @@ fn capture_stdout(mut cmd: Command) -> String {
 
 /// Run a read-only `git` command, returning raw stdout bytes (for `-z` parsing).
 /// `None` if git is missing or exits non-zero (degrade to a plain browser, AC-26).
-fn run_bytes(repo_root: &Path, args: &[&str]) -> Option<Vec<u8>> {
-    let out = git_command(repo_root, args).output().ok()?;
+fn run_bytes(op: &Operation, reach: Reach, args: &[&str]) -> Option<Vec<u8>> {
+    let out = op.command(reach, args).output().ok()?;
     out.status.success().then_some(out.stdout)
 }
 
 /// Run a read-only `git` command, returning stdout as a (lossy) string. `None` on
 /// failure. Used where the output is not a list of paths.
-fn run_raw(repo_root: &Path, args: &[&str]) -> Option<String> {
-    run_bytes(repo_root, args).map(|b| String::from_utf8_lossy(&b).into_owned())
+fn run_raw(op: &Operation, reach: Reach, args: &[&str]) -> Option<String> {
+    run_bytes(op, reach, args).map(|b| String::from_utf8_lossy(&b).into_owned())
 }
 
 /// Run a read-only `git` command and trim the stdout (for branch names / hashes).
-fn run_trimmed(repo_root: &Path, args: &[&str]) -> Option<String> {
-    run_raw(repo_root, args).map(|s| s.trim().to_string())
+fn run_trimmed(op: &Operation, reach: Reach, args: &[&str]) -> Option<String> {
+    run_raw(op, reach, args).map(|s| s.trim().to_string())
 }
 
 /// The current branch name, or `None` when detached. `pub` so the Session Controller can cache
 /// it for the tree's bottom-border title (it is computed once per (re-)root, never per-frame).
 pub fn current_branch(repo_root: &Path) -> Option<String> {
-    match run_trimmed(repo_root, &["rev-parse", "--abbrev-ref", "HEAD"]) {
+    current_branch_in(&Operation::new(repo_root))
+}
+
+fn current_branch_in(op: &Operation) -> Option<String> {
+    // `rev-parse` reads refs only; it never checks a submodule for changes.
+    match run_trimmed(
+        op,
+        Reach::Repository,
+        &["rev-parse", "--abbrev-ref", "HEAD"],
+    ) {
         Some(b) if b != "HEAD" => Some(b),
         _ => None,
     }
@@ -817,7 +1004,12 @@ pub fn current_branch(repo_root: &Path) -> Option<String> {
 /// The current branch (as [`current_branch`]) and HEAD's commit id, from ONE `git rev-parse`.
 /// Both `None` outside a repo or before the first commit (an unborn HEAD fails the call).
 pub fn head_state(repo_root: &Path) -> (Option<String>, Option<String>) {
-    let Some(out) = run_trimmed(repo_root, &["rev-parse", "HEAD", "--abbrev-ref", "HEAD"]) else {
+    // `rev-parse` reads refs only; it never checks a submodule for changes.
+    let Some(out) = run_trimmed(
+        &Operation::new(repo_root),
+        Reach::Repository,
+        &["rev-parse", "HEAD", "--abbrev-ref", "HEAD"],
+    ) else {
         return (None, None);
     };
     let mut lines = out.lines();
@@ -826,10 +1018,26 @@ pub fn head_state(repo_root: &Path) -> (Option<String>, Option<String>) {
     (branch, oid)
 }
 
+/// The commit a diff against `baseline` compares with: the fork point for Base when one resolves,
+/// else [`head_or_empty_tree`].
+fn baseline_commit(op: &Operation, baseline: Baseline, base_hint: Option<&str>) -> String {
+    match baseline {
+        Baseline::Head => head_or_empty_tree(op),
+        Baseline::Base => base_fork_point(op, base_hint).unwrap_or_else(|| head_or_empty_tree(op)),
+    }
+}
+
 /// `HEAD` when it resolves, else git's empty-tree object so an unborn repo's first
 /// (staged) files still diff as additions instead of failing on `bad revision 'HEAD'`.
-fn head_or_empty_tree(repo_root: &Path) -> String {
-    if run_raw(repo_root, &["rev-parse", "--verify", "--quiet", "HEAD"]).is_some() {
+fn head_or_empty_tree(op: &Operation) -> String {
+    // `rev-parse` reads refs only; it never checks a submodule for changes.
+    if run_raw(
+        op,
+        Reach::Repository,
+        &["rev-parse", "--verify", "--quiet", "HEAD"],
+    )
+    .is_some()
+    {
         "HEAD".to_string()
     } else {
         EMPTY_TREE.to_string()
@@ -855,18 +1063,21 @@ fn is_within_root(repo_root: &Path, path: &Path) -> bool {
 
 /// Whether `path` is untracked (not in the index) but present on disk. The path is passed
 /// as a raw OsStr arg so non-UTF-8 names match the index correctly.
-fn is_untracked(repo_root: &Path, path: &Path) -> bool {
-    let mut cmd = git_command(repo_root, &["ls-files", "--error-unmatch", "--"]);
+fn is_untracked(op: &Operation, path: &Path) -> bool {
+    // `ls-files --error-unmatch` matches index entries only; it never checks a submodule.
+    let mut cmd = op.command(Reach::Repository, &["ls-files", "--error-unmatch", "--"]);
     cmd.arg(path);
     let tracked = cmd.output().map(|o| o.status.success()).unwrap_or(false);
-    !tracked && repo_root.join(path).exists()
+    !tracked && op.repo_root.join(path).exists()
 }
 
 /// Whether a ref resolves to a commit. `--end-of-options` keeps a `-`-prefixed name from
 /// being parsed as a flag (defense-in-depth alongside [`is_safe_ref`]).
-fn ref_exists(repo_root: &Path, name: &str) -> bool {
+fn ref_exists(op: &Operation, name: &str) -> bool {
+    // `rev-parse` reads refs only; it never checks a submodule for changes.
     run_raw(
-        repo_root,
+        op,
+        Reach::Repository,
         &[
             "rev-parse",
             "--verify",
@@ -887,23 +1098,24 @@ fn is_safe_ref(name: &str) -> bool {
 /// The base/default branch: the host's hint if it is safe and resolves, else the
 /// conventional fallback. Remote-tracking refs are included so a freshly-cloned repo or
 /// worktree whose base exists only as `origin/main` still resolves a base (AC-14).
-fn resolve_base_branch(repo_root: &Path, hint: Option<&str>) -> Option<String> {
+fn resolve_base_branch(op: &Operation, hint: Option<&str>) -> Option<String> {
     if let Some(h) = hint
         && is_safe_ref(h)
-        && ref_exists(repo_root, h)
+        && ref_exists(op, h)
     {
         return Some(h.to_string());
     }
     ["main", "master", "origin/main", "origin/master"]
         .into_iter()
-        .find(|c| ref_exists(repo_root, c))
+        .find(|c| ref_exists(op, c))
         .map(str::to_string)
 }
 
 /// The merge-base of the base branch and HEAD — where the body of work forks off.
-fn base_fork_point(repo_root: &Path, hint: Option<&str>) -> Option<String> {
-    let base = resolve_base_branch(repo_root, hint)?;
-    run_trimmed(repo_root, &["merge-base", &base, "HEAD"])
+fn base_fork_point(op: &Operation, hint: Option<&str>) -> Option<String> {
+    let base = resolve_base_branch(op, hint)?;
+    // `merge-base` reads commits only; it never checks a submodule for changes.
+    run_trimmed(op, Reach::Repository, &["merge-base", &base, "HEAD"])
 }
 
 /// Map a 2-char porcelain code to one of the four tree statuses (AC-7).
@@ -1024,7 +1236,7 @@ mod tests {
     /// untracked-diff base (both derive from [`NULL_DEVICE`]), so the two callers cannot drift.
     #[test]
     fn hooks_path_hardening_uses_the_null_device_constant() {
-        let cmd = git_command(Path::new("/some/repo"), &["status"]);
+        let cmd = git_command(Path::new("/some/repo"), Reach::Repository, &["status"]);
         let args: Vec<String> = cmd
             .get_args()
             .map(|a| a.to_string_lossy().into_owned())
@@ -1133,13 +1345,31 @@ mod tests {
 
     #[test]
     fn filter_inventory_of_a_normal_repo_still_completes() {
-        let got = configured_filter_overrides_within(
-            Path::new(env!("CARGO_MANIFEST_DIR")),
-            FILTER_INVENTORY_TIMEOUT,
+        let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
+        assert!(
+            repository_filter_drivers(repo, FILTER_INVENTORY_TIMEOUT).is_some(),
+            "a readable repository config is still a complete inventory"
         );
         assert!(
-            got.is_some(),
-            "a readable repository config is still a complete inventory"
+            submodule_filter_drivers(
+                repo,
+                None,
+                FILTER_INVENTORY_TIMEOUT,
+                SUBMODULE_INVENTORY_TOTAL_TIMEOUT
+            )
+            .is_some(),
+            "a readable repository and index are still a complete recursive inventory"
+        );
+    }
+
+    /// The per-read budget bounds each repository; the total budget bounds the whole walk. A
+    /// spent total is an incomplete inventory, whatever the per-read budget allows.
+    #[test]
+    fn spent_total_budget_refuses_the_recursive_inventory() {
+        let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
+        assert!(
+            submodule_filter_drivers(repo, None, FILTER_INVENTORY_TIMEOUT, Duration::ZERO)
+                .is_none()
         );
     }
 
@@ -1180,13 +1410,18 @@ mod tests {
         );
 
         let started = std::time::Instant::now();
-        let got = configured_filter_overrides_within(&root, Duration::from_millis(200));
+        let budget = Duration::from_millis(200);
         assert!(
-            got.is_none(),
+            repository_filter_drivers(&root, budget).is_none(),
             "a stalled include is not a complete filter inventory"
         );
-        // The included fifo never returns. 2s is 10x the 200ms budget — enough for a loaded
-        // runner, still far below an unbounded wait. See AGENTS.md, "Tests prove things
+        assert!(
+            submodule_filter_drivers(&root, None, budget, SUBMODULE_INVENTORY_TOTAL_TIMEOUT)
+                .is_none(),
+            "the per-read budget, not the much larger total, bounds a stalled include"
+        );
+        // The included fifo never returns. 2s is 5x the two 200ms reads — enough for a loaded
+        // runner, still far below an unbounded wait or the 30s total budget. See AGENTS.md, "Tests prove things
         // deterministically".
         assert!(
             started.elapsed() < Duration::from_secs(2),
@@ -1297,7 +1532,11 @@ mod tests {
     /// version cannot silently desync the two.
     #[test]
     fn live_git_command_matches_attr_source_probe() {
-        let cmd = git_command(Path::new(env!("CARGO_MANIFEST_DIR")), &["status"]);
+        let cmd = git_command(
+            Path::new(env!("CARGO_MANIFEST_DIR")),
+            Reach::Submodules,
+            &["status"],
+        );
         let args = command_args(&cmd);
         let pinned = args.iter().any(|a| a.starts_with("--attr-source="));
         assert_eq!(
