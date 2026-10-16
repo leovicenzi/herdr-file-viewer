@@ -458,8 +458,10 @@ const MAX_SUBMODULE_DEPTH: usize = 8;
 /// superprojects, it bounds the git processes a hostile index can make one query start.
 const MAX_INVENTORIED_SUBMODULES: usize = 10_000;
 
-/// Submodule repositories inventoried at once. Each inventory runs three short-lived git
-/// processes, so this bounds concurrent children (and their pipes) for a many-submodule repo.
+/// Submodule repositories inventoried at once. Each inventory runs two short-lived git processes
+/// (three when its worktree needs `rev-parse`), so this bounds concurrent children (and their
+/// pipes) for a many-submodule repo. More workers do not help: the walk is bound by process
+/// start-up, not by waiting.
 const SUBMODULE_INVENTORY_PARALLELISM: usize = 8;
 
 /// How far a git command can reach, which decides whose filter drivers its overrides must cover.
