@@ -24,7 +24,6 @@ All notable changes to this project are documented here. The format is based on
 - `changed_only` starts the viewer on the changed-only tree, as if `c` had been pressed. Off by default. Thanks @TheHolyWaffle for the request (#195) → [configuration](docs/configuration.md) · [usage](docs/usage.md#git-awareness)
 
 ### Fixed
-- A repository can no longer run a program through a filter driver configured inside one of its submodules while the viewer checks that submodule for changes. Submodule changes are shown as before. → [security](SECURITY.md)
 - Go-to-file (`f`) no longer freezes on very large roots such as `$HOME`. Thanks @sanjaibalajee (#177) and @lemonbalms for the report (#173) → [usage](docs/usage.md#finding-a-file-fast)
 - The open file reloads when you focus the viewer after it was edited, committed or staged elsewhere, keeping your scroll and search. Thanks @sftinc for the request (#180) → [usage](docs/usage.md#git-awareness)
 - The selected file stays selected when files appear or disappear above it. Thanks @sftinc (#181)
@@ -46,7 +45,6 @@ All notable changes to this project are documented here. The format is based on
 - `open_direction`: choose which way the summon key splits your pane — `"right"` (the default, viewer beside your work) or `"down"`, which keeps the terminal on top and puts the viewer underneath. `"bottom"` is accepted as a synonym. The tab action is unaffected, and the launcher reads it per summon, so the next `prefix+f` obeys it with no reload. Thanks @diegopzz and @pmaxvsbobo (#152, #167) → [configuration](docs/configuration.md) · [summoning](docs/summoning.md#split-beside-or-below)
 
 ### Fixed
-- A repository can no longer run a program through a filter driver configured inside one of its submodules while the viewer checks that submodule for changes. Submodule changes are shown as before. → [security](SECURITY.md)
 - Restore Git status, branch, and diffs on git 2.39 (Apple’s Xcode git), while disabling configured filter commands. Thanks @arykhoda (#160, #162) → [usage](docs/usage.md#git-awareness) · [install](docs/install.md)
 - The tree and Go-to-file index no longer inherit `.gitignore` rules from an unrelated directory or repository above a browsed Git repository. The ancestor-`.gitignore` search climbed to the filesystem root with no repo-boundary check, so a repo nested under an unrelated enclosing `.gitignore` (a monorepo checkout, a dotfiles-managed home directory) could render a completely empty tree with no error. Thanks @rubenvarela (#166).
 - Content placeholders now distinguish a binary file from a broken symlink, an out-of-root path, an unreadable file, or a non-regular file. Thanks @samsimsom (#171)
@@ -62,7 +60,6 @@ All notable changes to this project are documented here. The format is based on
 - `changed_file_view`: choose whether existing Git-changed files initially open as diffs (default) or in their normal rendered Markdown/syntax-content view; deleted paths stay diff-first, and `v` still cycles through the diff views. Thanks @umutciloglu (#146) → [configuration](docs/configuration.md) · [usage](docs/usage.md#viewing-a-file)
 
 ### Fixed
-- A repository can no longer run a program through a filter driver configured inside one of its submodules while the viewer checks that submodule for changes. Submodule changes are shown as before. → [security](SECURITY.md)
 - Agent skill: the launch instructions no longer tell agents to pass `--cwd`. herdr resolves the manifest's relative pane command against it, so the launch failed with `plugin_pane_open_failed` — or worse, inside a built plugin checkout, silently ran that checkout's binary. The skill and the `docs/usage.md` snippet now explain that the viewed root follows the *focused herdr pane's* directory, so an agent's own `cd` does not move it. Thanks @AntonyKor (#139) → [agent skill](skills/herdr-file-viewer/SKILL.md) · [usage](docs/usage.md#teach-your-agent)
 
 ## [1.15.0] - 2026-08-03
@@ -78,7 +75,6 @@ All notable changes to this project are documented here. The format is based on
 - The `[keys]` configuration snippet in the docs is clearer. Thanks @petrusck (#120) → [configuration](docs/configuration.md#keybindings)
 
 ### Fixed
-- A repository can no longer run a program through a filter driver configured inside one of its submodules while the viewer checks that submodule for changes. Submodule changes are shown as before. → [security](SECURITY.md)
 - Windows: `config.toml` is read again. The Windows launchers spawn the viewer by absolute path (they cannot use the manifest's relative pane command), so the pane never received `HERDR_PLUGIN_CONFIG_DIR`; the viewer then fell back to `$XDG_CONFIG_HOME` / `$HOME`, which Windows does not set, resolved a relative path, and correctly refused to read it. Every key — `editor`, `tree_width`, `tree_max_cols`, the lot — was silently ignored. The launchers now pass the directory through, and a standalone run falls back to `%USERPROFILE%\.config\herdr-file-viewer\config.toml`. Thanks @Jprnp (#129) → [configuration](docs/configuration.md#file-location)
 - Tree rows now indent by depth alone. A file row reserved no space for the expand arrow, so a file sat two columns left of a directory at the same depth — putting every file in the exact column of its parent directory's name, and every top-level file two columns left of the directory beside it. Files now reserve the arrow's width, so siblings line up and a child always reads one level in from its parent. Thanks @Jprnp (#130) → [usage](docs/usage.md#the-tree)
 - **Windows only:** AltGr characters now trigger their bound actions; only `Ctrl+Alt` plus optional `Shift` on character keys is inferred as AltGr. Thanks @Jprnp (#128) → [keys](docs/keys.md)
@@ -92,7 +88,6 @@ All notable changes to this project are documented here. The format is based on
 - Git-status mode (`d`): filter the tree to current working-tree status and force working-tree diffs (file or directory-scoped); sticky until `d` again, mutually exclusive with baseline-aware `c`. Thanks @jellydn (#110). → [usage](docs/usage.md#git-awareness) · [keys](docs/keys.md)
 
 ### Fixed
-- A repository can no longer run a program through a filter driver configured inside one of its submodules while the viewer checks that submodule for changes. Submodule changes are shown as before. → [security](SECURITY.md)
 - Diff and full-file-diff panes now pass the pane width to Delta, so side-by-side diffs size their columns to the pane instead of a fixed fallback, and re-render on resize. Thanks @rrrrnmtsu (#111).
 
 ## [1.13.0] - 2026-07-16
@@ -105,7 +100,6 @@ All notable changes to this project are documented here. The format is based on
 - Settings tab shows each setting's effective value instead of a `(default)` placeholder; the renderer commands are no longer listed (they live in the config file). → [configuration](docs/configuration.md)
 
 ### Fixed
-- A repository can no longer run a program through a filter driver configured inside one of its submodules while the viewer checks that submodule for changes. Submodule changes are shown as before. → [security](SECURITY.md)
 - Native Windows launchers now preserve non-ASCII pane titles and paths while parsing herdr JSON, instead of falling back to the plugin install directory. Thanks @mkioutcc (#105).
 
 ## [1.12.0] - 2026-07-13
@@ -123,7 +117,6 @@ All notable changes to this project are documented here. The format is based on
 - Docs reorganized: the README is a lean front door; the full reference moved to [docs/](docs/README.md), plus a `CONTRIBUTING.md` and issue/PR templates.
 
 ### Fixed
-- A repository can no longer run a program through a filter driver configured inside one of its submodules while the viewer checks that submodule for changes. Submodule changes are shown as before. → [security](SECURITY.md)
 - Wide markdown tables now fit the pane instead of shattering; `w` toggles a full-width scrollable view.
 
 ## [1.11.0] - 2026-07-09
@@ -136,7 +129,6 @@ All notable changes to this project are documented here. The format is based on
 - In line-select mode a mouse press now places the caret; copying is always an explicit `Enter`/`y`.
 
 ### Fixed
-- A repository can no longer run a program through a filter driver configured inside one of its submodules while the viewer checks that submodule for changes. Submodule changes are shown as before. → [security](SECURITY.md)
 - Open-in-tab (`prefix+shift+f`) no longer jumps to a viewer in another workspace.
 - Closed the left gap in the rendered-markdown and diff views (now aligned with the syntax view).
 
@@ -171,7 +163,6 @@ The "Optimisations" release: accessibility cues, UX papercuts, and internal hard
 - Internal: shared the subprocess reaper, hardened test timing/coverage, and fixed doc drift across `install.md` / `renderers.md` / `ARCHITECTURE.md` and the release workflow.
 
 ### Fixed
-- A repository can no longer run a program through a filter driver configured inside one of its submodules while the viewer checks that submodule for changes. Submodule changes are shown as before. → [security](SECURITY.md)
 - Content pane no longer shows a stale file under a new title while a render is in flight (shows a `Rendering…` placeholder).
 
 ## [1.6.0] - 2026-06-28
@@ -187,7 +178,6 @@ The "Optimisations" release: accessibility cues, UX papercuts, and internal hard
 - Install reuses the latest released binary even when `main` is ahead of the tag (matches by version, not commit). → [install](docs/install.md)
 
 ### Fixed
-- A repository can no longer run a program through a filter driver configured inside one of its submodules while the viewer checks that submodule for changes. Submodule changes are shown as before. → [security](SECURITY.md)
 - The worktree picker's `←` responds immediately after over-scrolling right.
 
 ## [1.5.0] - 2026-06-25
@@ -198,7 +188,6 @@ The "Optimisations" release: accessibility cues, UX papercuts, and internal hard
 - Hide hidden files (`.`): drop dot-prefixed entries, independent of the gitignore toggle. Thanks @julianduque (#46).
 
 ### Fixed
-- A repository can no longer run a program through a filter driver configured inside one of its submodules while the viewer checks that submodule for changes. Submodule changes are shown as before. → [security](SECURITY.md)
 - The tree scrolls to follow the selection on long file lists. Thanks @julianduque (#45).
 
 ## [1.4.0] - 2026-06-25
@@ -225,7 +214,6 @@ The "Optimisations" release: accessibility cues, UX papercuts, and internal hard
 ## [1.2.1] - 2026-06-23
 
 ### Fixed
-- A repository can no longer run a program through a filter driver configured inside one of its submodules while the viewer checks that submodule for changes. Submodule changes are shown as before. → [security](SECURITY.md)
 - Prebuilt install path now works for a normal `herdr plugin install`: the gate compares `HEAD` to a published `COMMIT` marker instead of a local tag (which the install checkout lacks).
 
 ## [1.2.0] - 2026-06-23
