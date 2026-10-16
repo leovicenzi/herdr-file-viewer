@@ -642,6 +642,8 @@ fn parse_gitlinks(mut listing: impl std::io::BufRead) -> Option<Vec<PathBuf>> {
     loop {
         record.clear();
         if listing.read_until(0, &mut record).ok()? == 0 {
+            // A conflicted gitlink has one record per stage; inventory its checkout once.
+            gitlinks.dedup();
             return Some(gitlinks);
         }
         if !record.starts_with(b"160000 ") {
@@ -1199,7 +1201,9 @@ mod tests {
         let listing = b"100644 0123 0\tsrc/main.rs\0\
                         160000 4567 0\tvendor/lib\0\
                         120000 89ab 0\tlink\0\
-                        160000 cdef 2\twith space/sub\0";
+                        160000 cdef 1\twith space/sub\0\
+                        160000 cdef 2\twith space/sub\0\
+                        160000 cdef 3\twith space/sub\0";
         assert_eq!(
             parse_gitlinks(&listing[..]),
             Some(vec![
