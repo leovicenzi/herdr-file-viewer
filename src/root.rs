@@ -90,7 +90,7 @@ fn directory_owning_git_dir(start: &Path, git_dir: &Path) -> Option<PathBuf> {
 
 /// The canonical git dir a `.git` file (`gitdir: <path>`) in `dir` points at. Like git, only
 /// trailing line terminators are stripped and a relative path resolves against `dir`.
-fn gitfile_target(dir: &Path, gitfile: &Path) -> Option<PathBuf> {
+pub(crate) fn gitfile_target(dir: &Path, gitfile: &Path) -> Option<PathBuf> {
     let content = std::fs::read_to_string(gitfile).ok()?;
     let target = content
         .strip_prefix("gitdir: ")?

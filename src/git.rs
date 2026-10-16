@@ -405,11 +405,14 @@ fn os_string_from_git_bytes(bytes: Vec<u8>) -> Option<OsString> {
     String::from_utf8(bytes).ok().map(OsString::from)
 }
 
-/// Extract every configured filter driver name from `git config --null --name-only` output.
-/// A driver subsection may itself contain dots, so split at the final dot, not every dot.
+/// Extract every configured filter driver name from `git config --null` output, with or without
+/// values (`key\nvalue` records). A driver subsection may itself contain dots, so split at the
+/// final dot, not every dot.
 fn configured_filter_driver_names(out: &[u8]) -> BTreeSet<Vec<u8>> {
     let mut drivers = BTreeSet::new();
-    for key in out.split(|byte| *byte == 0).filter(|key| !key.is_empty()) {
+    for record in out.split(|byte| *byte == 0).filter(|key| !key.is_empty()) {
+        // A key never contains a newline; a value may.
+        let key = record.split(|byte| *byte == b'\n').next().unwrap_or(record);
         let Some(prefix) = key.get(..7) else { continue };
         if !prefix.eq_ignore_ascii_case(b"filter.") {
             continue;
@@ -542,8 +545,9 @@ impl<'a> Operation<'a> {
 /// pass-through; in git 2.39's `convert.c`, empty clean/process strings are likewise rejected by
 /// the `*cmd` check before any child can spawn.
 fn repository_filter_drivers(repo_root: &Path, timeout: Duration) -> Option<BTreeSet<Vec<u8>>> {
-    let config = spawn_inventory_reader(repo_root, &FILTER_CONFIG_ARGS, read_capped)?;
-    config_drivers(config.finish(Instant::now() + timeout)?)
+    let config = spawn_inventory_reader(repo_root, false, &FILTER_CONFIG_ARGS, read_capped)?;
+    let listing = config_listing(config.finish(Instant::now() + timeout)?)?;
+    Some(configured_filter_driver_names(&listing))
 }
 
 /// Filter driver names configured for `repo_root` and for every populated submodule below it,
@@ -657,20 +661,21 @@ struct RepoInventory {
     populated_submodules: Vec<PathBuf>,
 }
 
-/// `git config` arguments that list every configured filter key, following includes.
-const FILTER_CONFIG_ARGS: [&str; 6] = [
+/// `git config` arguments that list every configured filter key and every `core.worktree`
+/// value, following includes. Values come too: the submodule worktree check reads them.
+const FILTER_CONFIG_ARGS: [&str; 5] = [
     "config",
     "--includes",
     "--null",
-    "--name-only",
     "--get-regexp",
-    r"^filter\.",
+    r"^filter\.|^core\.worktree$",
 ];
 
 /// Inventory `dir`'s configured filter driver names (unless `known` already holds them) and its
-/// populated submodules. Built-in `git config`, `git ls-files` and `git rev-parse` only: they
-/// read configuration and the index, never attributes, and never invoke filter drivers. The
-/// children run concurrently, each bounded by `per_read` and all by `total_deadline`.
+/// populated submodules. Built-in `git config`, `git ls-files` and, only when the listing cannot
+/// settle a submodule's worktree, `git rev-parse`: they read configuration and the index, never
+/// attributes, and never invoke filter drivers. The children run concurrently, each bounded by
+/// `per_read` and all by `total_deadline`.
 fn inventory_repo(
     dir: &Path,
     is_submodule: bool,
@@ -686,37 +691,41 @@ fn inventory_repo(
         Some(_) => None,
         None => Some(spawn_inventory_reader(
             dir,
+            is_submodule,
             &FILTER_CONFIG_ARGS,
             read_capped,
         )?),
     };
     // The index, not `.gitmodules`, is what git consults: a gitlink with no `.gitmodules` entry
     // is still checked for a dirty worktree.
-    let gitlinks = spawn_inventory_reader(dir, &["ls-files", "--stage", "-z"], read_gitlinks)?;
-    // A submodule's own `core.worktree` decides where its nested status runs. Follow it only when
-    // it is the checkout the superproject sees; anything else is not a complete inventory. This
-    // stays a separate `rev-parse`: deriving the worktree from the config listing would
-    // re-implement git's `core.worktree` resolution, and it runs alongside the other two reads.
-    let toplevel = if is_submodule {
-        Some(spawn_inventory_reader(
-            dir,
-            &["rev-parse", "--show-toplevel"],
-            read_capped,
-        )?)
-    } else {
-        None
-    };
+    let gitlinks = spawn_inventory_reader(
+        dir,
+        is_submodule,
+        &["ls-files", "--stage", "-z"],
+        read_gitlinks,
+    )?;
 
-    let drivers = match (known, config) {
-        (Some(known), _) => known,
-        (None, Some(config)) => config_drivers(config.finish(deadline)?)?,
+    let (drivers, listing) = match (known, config) {
+        (Some(known), _) => (known, None),
+        (None, Some(config)) => {
+            let listing = config_listing(config.finish(deadline)?)?;
+            (configured_filter_driver_names(&listing), Some(listing))
+        }
         (None, None) => return None,
     };
     let (gitlinks_status, gitlinks) = gitlinks.finish(deadline)?;
     if !gitlinks_status.success() {
         return None;
     }
-    if let Some(toplevel) = toplevel {
+    // A submodule's own `core.worktree` decides where its nested status runs. Follow it only when
+    // it is the checkout the superproject sees; anything else is not a complete inventory.
+    if is_submodule
+        && !listing
+            .as_deref()
+            .is_some_and(|listing| worktree_is_checkout(dir, listing))
+    {
+        let toplevel =
+            spawn_inventory_reader(dir, true, &["rev-parse", "--show-toplevel"], read_capped)?;
         let (status, out) = toplevel.finish(deadline)?;
         // Raw bytes, like every other path this module reads from git: a non-UTF-8 checkout
         // path must still compare equal to itself.
@@ -739,15 +748,51 @@ fn inventory_repo(
     })
 }
 
-/// Driver names from a finished `git config --get-regexp` read. It returns 1 for no matches.
-/// Every other failure is unsafe to interpret as "no filters": fail closed rather than running
-/// the requested repo query with an incomplete inventory.
-fn config_drivers(
+/// Whether the config listing alone proves that git's worktree for the submodule at `dir` is
+/// `dir`, which saves a `rev-parse` per submodule. Git runs a submodule's status with
+/// `GIT_DIR=.git` from `dir`, so its worktree is `dir` unless `core.worktree` is set, and a
+/// relative value resolves against the real git dir (git `chdir`s there, then to the value).
+/// The listing holds every `core.worktree` git could read, so when each one resolves to `dir`,
+/// git's choice does too. Anything else (an unreadable `.git`, a valueless or foreign entry) is
+/// `false` and left to `rev-parse`.
+fn worktree_is_checkout(dir: &Path, listing: &[u8]) -> bool {
+    let mut values = listing
+        .split(|byte| *byte == 0)
+        .filter(|record| record.starts_with(b"core.worktree"))
+        .peekable();
+    if values.peek().is_none() {
+        return true;
+    }
+    let Ok(checkout) = dir.canonicalize() else {
+        return false;
+    };
+    let dot_git = dir.join(".git");
+    let git_dir = if dot_git.is_dir() {
+        dot_git.canonicalize().ok()
+    } else {
+        crate::root::gitfile_target(dir, &dot_git)
+    };
+    let Some(git_dir) = git_dir else {
+        return false;
+    };
+    values.all(|record| {
+        record
+            .strip_prefix(b"core.worktree\n")
+            .and_then(path_from_git_bytes)
+            .and_then(|value| git_dir.join(value).canonicalize().ok())
+            .is_some_and(|worktree| worktree == checkout)
+    })
+}
+
+/// The output of a finished `git config --get-regexp` read. It returns 1 for no matches. Every
+/// other failure is unsafe to interpret as "no filters": fail closed rather than running the
+/// requested repo query with an incomplete inventory.
+fn config_listing(
     (status, output): (std::process::ExitStatus, Option<Vec<u8>>),
-) -> Option<BTreeSet<Vec<u8>>> {
+) -> Option<Vec<u8>> {
     let output = output?;
     let no_matches = status.code() == Some(1) && output.is_empty();
-    (status.success() || no_matches).then(|| configured_filter_driver_names(&output))
+    (status.success() || no_matches).then_some(output)
 }
 
 /// A spawned inventory child whose stdout is consumed on its own thread.
@@ -756,12 +801,20 @@ struct InventoryReader<T> {
     output: mpsc::Receiver<Option<T>>,
 }
 
+/// `as_submodule` selects the repository the way git does when it checks a submodule for changes:
+/// `GIT_DIR=.git` from the checkout, never discovery. A checkout whose `.git` is not a repository
+/// then fails here instead of reading an enclosing repository.
 fn spawn_inventory_reader<T: Send + 'static>(
     dir: &Path,
+    as_submodule: bool,
     args: &[&str],
     read: fn(std::process::ChildStdout) -> Option<T>,
 ) -> Option<InventoryReader<T>> {
-    let mut child = base_git_command(dir)
+    let mut cmd = base_git_command(dir);
+    if as_submodule {
+        cmd.env("GIT_DIR", ".git");
+    }
+    let mut child = cmd
         .args(args)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -788,6 +841,16 @@ impl<T> InventoryReader<T> {
         let output = self
             .output
             .recv_timeout(deadline.saturating_duration_since(Instant::now()));
+        if output.is_ok() {
+            // A child that closed its output is exiting: poll finely so a large inventory does
+            // not pay the shared helper's 10ms poll interval per read.
+            while Instant::now() < deadline {
+                if let Ok(Some(status)) = self.child.try_wait() {
+                    return Some((status, output.ok()?));
+                }
+                std::thread::sleep(Duration::from_millis(1));
+            }
+        }
         let status = crate::proc::wait_until(&mut self.child, deadline)?;
         Some((status, output.ok()?))
     }
@@ -1319,6 +1382,58 @@ mod tests {
                 b"with.dots".to_vec(),
             ])
         );
+    }
+
+    #[test]
+    fn filter_names_are_read_from_a_listing_with_values() {
+        let names = configured_filter_driver_names(
+            b"filter.lfs.clean\ngit-lfs clean -- %f\0filter.a.b.process\nx.y\nz.clean\0\
+              core.worktree\n../../sub\0filter.bare.required\0",
+        );
+        assert_eq!(
+            names,
+            BTreeSet::from([b"lfs".to_vec(), b"a.b".to_vec(), b"bare".to_vec()])
+        );
+    }
+
+    /// The listing settles a submodule's worktree only when every `core.worktree` it holds
+    /// resolves, against the real git dir, to the checkout itself.
+    #[test]
+    fn worktree_listing_proves_only_the_checkout_itself() {
+        let root = std::env::temp_dir().join(format!(
+            "hfv-worktree-proof-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        let embedded = root.join("embedded");
+        let absorbed = root.join("absorbed");
+        std::fs::create_dir_all(embedded.join(".git")).unwrap();
+        std::fs::create_dir_all(root.join("modules/absorbed")).unwrap();
+        std::fs::create_dir_all(&absorbed).unwrap();
+        std::fs::write(absorbed.join(".git"), "gitdir: ../modules/absorbed\n").unwrap();
+        let absolute = embedded.canonicalize().unwrap();
+        let absolute = absolute.to_str().unwrap();
+
+        assert!(worktree_is_checkout(&embedded, b"filter.x.clean\nc\0"));
+        assert!(worktree_is_checkout(&embedded, b"core.worktree\n..\0"));
+        assert!(worktree_is_checkout(
+            &embedded,
+            format!("core.worktree\n{absolute}\0").as_bytes()
+        ));
+        assert!(worktree_is_checkout(
+            &absorbed,
+            b"core.worktree\n../../absorbed\0"
+        ));
+        assert!(!worktree_is_checkout(&embedded, b"core.worktree\n../..\0"));
+        assert!(!worktree_is_checkout(&embedded, b"core.worktree\0"));
+        assert!(!worktree_is_checkout(
+            &embedded,
+            b"core.worktree\n..\0core.worktree\n../..\0"
+        ));
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]
