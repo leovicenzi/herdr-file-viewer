@@ -1,0 +1,63 @@
+{
+  "run_id": "herdr-file-viewer-run-2",
+  "repo": "smarzban/herdr-file-viewer",
+  "target": "/workspace",
+  "source_ref": {
+    "commit": "f2114a9357021cb7df6851e6d25a2576f29ab5ad",
+    "dirty": false,
+    "baseline_commit": "d89246d006e563f16b577468f04e13365d57fce6",
+    "delta_commits": [
+      "c1cf66235a2be766dd6058c848f4a55817471e33",
+      "313149da508466a498b02cc6aadfda9beb3e1fa6",
+      "7c8c40850d7d90e99122a74696ef3af0fd76ab8f",
+      "b403441cfc70f9e116686226bd604db60ffdb9a0",
+      "e7779cbcf3b666a38e5fa68af0410ce09ac7b957",
+      "f2114a9357021cb7df6851e6d25a2576f29ab5ad"
+    ]
+  },
+  "profile": "standard",
+  "scope": "scoped-delta",
+  "scope_paths": [
+    "ARCHITECTURE.md",
+    "CHANGELOG.md",
+    "CONTEXT.md",
+    "README.md",
+    "SECURITY.md",
+    "src/app.rs",
+    "src/controller/mod.rs",
+    "src/controller/mouse.rs",
+    "src/git.rs",
+    "src/root.rs",
+    "src/worktree.rs",
+    "tests/annotations.rs",
+    "tests/git_baseline.rs",
+    "tests/worktree.rs"
+  ],
+  "budget": null,
+  "execution_policy": "sandboxed-source-and-local-only",
+  "selected_companion_files": [
+    "DESKTOP-MOBILE-AND-LOCAL-IPC.md",
+    "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md"
+  ],
+  "prior_run_paths": [
+    "origin/security-audit/2026-10-16:security-audit/2026-10-16/coverage-ledger.json",
+    "origin/security-audit/2026-10-16:security-audit/2026-10-16/findings.json",
+    "origin/security-audit/2026-10-16:security-audit/2026-10-16/architecture.md"
+  ],
+  "prior_ledger_status": "compatible coverage-ledger.json and findings.json from security-audit/2026-10-16; no earlier security-audit/* branch",
+  "shared_file_owners": {
+    "parent": "coordinator"
+  },
+  "run_status": "complete",
+  "skill_directory": "/tmp/security-audit-skill/skills/security-audit",
+  "output_directory": "/home/ubuntu/security-audit-skill/herdr-file-viewer/run-2",
+  "agents_spent": {
+    "reconnaissance": 1,
+    "hunters": 2,
+    "post_wave_critic": 1,
+    "final_clean_critic": 1,
+    "candidate_verifier": 2,
+    "record_verifier": 1
+  },
+  "notes": "First candidate verifier returned a non-schema record and was discarded. The second returned the schema-shaped confirmed record. Parent git fixtures ran under unshare user/net/mount."
+}
