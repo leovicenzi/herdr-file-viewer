@@ -1,0 +1,88 @@
+{
+  "run_id": "herdr-file-viewer-run-3",
+  "repo": "smarzban/herdr-file-viewer",
+  "target": "/workspace",
+  "source_ref": {
+    "commit": "97ba479f6ecd577ca5acaad2f32983c852355f9f",
+    "dirty": false,
+    "baseline_commit": "f2114a9357021cb7df6851e6d25a2576f29ab5ad",
+    "delta_commits": [
+      "308c0e2",
+      "28f11cc",
+      "3a78831",
+      "351fc55",
+      "7e53aab",
+      "97ba479"
+    ]
+  },
+  "profile": "standard",
+  "scope": "scoped delta from f2114a9357021cb7df6851e6d25a2576f29ab5ad to 97ba479f6ecd577ca5acaad2f32983c852355f9f, plus security-relevant paths those edits touch",
+  "scope_paths": [
+    ".github/CODEOWNERS",
+    "CONTEXT.md",
+    "scripts/open-file-viewer-tab.ps1",
+    "scripts/open-file-viewer-tab.sh",
+    "src/app.rs",
+    "src/controller/finder.rs",
+    "src/controller/git_apply.rs",
+    "src/controller/help.rs",
+    "src/controller/infile.rs",
+    "src/controller/lineselect.rs",
+    "src/controller/mod.rs",
+    "src/controller/mouse.rs",
+    "src/controller/picker.rs",
+    "src/git.rs",
+    "src/help.rs",
+    "src/input.rs",
+    "src/intent.rs",
+    "src/presenter.rs",
+    "src/preview_layout.rs",
+    "src/proc.rs",
+    "src/view_policy.rs",
+    "tests/cli_smoke.rs",
+    "tests/e2e_editor.rs",
+    "tests/e2e_help.rs",
+    "tests/e2e_keyboard.rs",
+    "tests/e2e_nongit.rs",
+    "tests/e2e_open_target.rs",
+    "tests/e2e_pinned_preview.rs",
+    "tests/e2e_remote_notice.rs",
+    "tests/presenter.rs",
+    "tests/presenter_narrow.rs",
+    "tests/reroot.rs"
+  ],
+  "budget": null,
+  "execution_policy": "sandboxed-source-and-local-only",
+  "selected_companion_files": [
+    "DESKTOP-MOBILE-AND-LOCAL-IPC.md",
+    "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md"
+  ],
+  "agents_spent": {
+    "reconnaissance": 4,
+    "hunters": 4,
+    "coverage_critics": 2,
+    "verifiers": 2,
+    "total": 12,
+    "notes": "hunter-input returned a malformed check schema and was discarded. hunter-input-b re-read those three units."
+  },
+  "prior_run_paths": [
+    "origin/security-audit/2026-10-17:security-audit/2026-10-17/coverage-ledger.json",
+    "origin/security-audit/2026-10-17:security-audit/2026-10-17/findings.json",
+    "origin/security-audit/2026-10-16:security-audit/2026-10-16/coverage-ledger.json",
+    "origin/security-audit/2026-10-16:security-audit/2026-10-16/findings.json"
+  ],
+  "prior_ledger_status": "compatible scoped standard ledgers present for commits d89246d0 and f2114a9",
+  "shared_file_owners": {
+    "run-metadata.json": "parent",
+    "architecture.md": "parent",
+    "coverage-ledger.json": "parent",
+    "findings.json": "parent",
+    "REPORT.md": "parent",
+    "FINDINGS-DETAIL.md": "parent",
+    "NEEDS-VALIDATION.md": "parent"
+  },
+  "skill_directory": "/tmp/security-audit-skill/skills/security-audit",
+  "output_directory": "/home/ubuntu/security-audit-skill/smarzban-herdr-file-viewer/run-3",
+  "run_status": "complete",
+  "notes": "Source-only delta. Do not attack deployed services, file public issues, or disclose externally. Carry prior findings; do not re-report unchanged confirmed root causes. Local target execution only if an OS sandbox with empty env, no external network, read-only target, scratch-only writes, and resource limits is actually enforceable."
+}
