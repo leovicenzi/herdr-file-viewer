@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Local Kokoro/MLX helper. stdin/stdout: JSON lines; stdout is protocol only.
+"""Local Kokoro helper. stdin/stdout: JSON lines; stdout is protocol only.
 
-Audio and input text stay in memory. A single synthesis thread owns MLX, keeps the
-model warm, and prefetches at most two phrases. The audio callback never synthesizes
+MLX runs inference on Apple Silicon; elsewhere PyTorch does, on CUDA when present.
+Audio and input text stay in memory. A single synthesis thread owns the model, keeps it
+warm, and prefetches at most two phrases. The audio callback never synthesizes
 or launches processes. Progress uses PortAudio's output DAC clock, not a text timer.
 """
 from __future__ import annotations
@@ -11,21 +12,25 @@ import contextlib
 import json
 import math
 import os
+import platform
 import queue
 import subprocess
 import sys
 import threading
 import time
 from dataclasses import dataclass
-from collections import OrderedDict
+from collections import OrderedDict, deque
 
 PROTOCOL_OUT = sys.stdout
 MODEL = "mlx-community/Kokoro-82M-bf16"
+TORCH_MODEL = "hexgrad/Kokoro-82M"
 SAMPLE_RATE = 24000
 MAX_REQUEST = 2 * 1024 * 1024
 MAX_TEXT_BYTES = 256 * 1024
 MAX_CACHE_BYTES = 16 * 1024 * 1024
 MAX_CACHE_PHRASES = 16
+# Buffers queued ahead of the DAC: ~1 on CoreAudio, 2+ on ALSA/PipeWire at 20 ms blocks.
+MAX_QUEUED_BUFFERS = 32
 
 
 def emit(event, ident, **fields):
@@ -176,9 +181,19 @@ def read_commands(control):
         control.closed.set()
 
 
+def use_mlx():
+    return sys.platform == "darwin" and platform.machine() == "arm64"
+
+
+def torch_device(torch):
+    """HERDR_TTS_DEVICE wins; otherwise CUDA when present, else CPU."""
+    requested = os.environ.get("HERDR_TTS_DEVICE", "").strip()
+    if requested:
+        return requested
+    return "cuda" if torch.cuda.is_available() else "cpu"
+
+
 def load_pipeline():
-    from mlx_audio.tts.utils import load_model
-    from mlx_audio.tts.models.kokoro.pipeline import KokoroPipeline
     lang_code = os.environ.get("HERDR_TTS_LANG", "a")
     if lang_code in ("a", "b"):
         # Provisioning must remain explicit, never an implicit Misaki download.
@@ -187,8 +202,15 @@ def load_pipeline():
             version("en-core-web-sm")
         except PackageNotFoundError:
             raise RuntimeError("English language data is missing; run scripts/setup-tts.sh")
-    model = load_model(MODEL)
-    return KokoroPipeline(lang_code=lang_code, model=model, repo_id=MODEL)
+    if use_mlx():
+        from mlx_audio.tts.utils import load_model
+        from mlx_audio.tts.models.kokoro.pipeline import KokoroPipeline
+        model = load_model(MODEL)
+        return KokoroPipeline(lang_code=lang_code, model=model, repo_id=MODEL)
+    # Same misaki-based pipeline (graphemes + token timestamps), on PyTorch.
+    import torch
+    from kokoro import KPipeline
+    return KPipeline(lang_code=lang_code, repo_id=TORCH_MODEL, device=torch_device(torch))
 
 
 def generate_job(control, job, pipeline, voice, np):
@@ -205,7 +227,10 @@ def generate_job(control, job, pipeline, voice, np):
             for result in pipeline(text, voice=voice, speed=1.0):
                 if ident != control.ident or control.closed.is_set():
                     break
-                audio = np.asarray(result.audio, dtype=np.float32).reshape(-1)
+                audio = result.audio
+                if hasattr(audio, "cpu"):  # PyTorch tensor; MLX arrays convert directly
+                    audio = audio.detach().cpu()
+                audio = np.asarray(audio, dtype=np.float32).reshape(-1)
                 segment = result.graphemes
                 at = text.find(segment, cursor)
                 if at >= 0:
@@ -258,7 +283,7 @@ class Player:
         self.origin = 0.0
         self.elapsed_origin = 0.0
         self.paused = False
-        self.clock = None
+        self.clocks = deque(maxlen=MAX_QUEUED_BUFFERS)
         self.finished_at = None
 
     def callback(self, out, frames, timing, status):
@@ -268,10 +293,10 @@ class Player:
                 return
             count = min(frames, len(self.audio) - self.position)
             out[:count, 0] = self.audio[self.position:self.position+count]
-            self.clock = (timing.outputBufferDacTime,
+            self.clocks.append((timing.outputBufferDacTime,
                           self.origin + self.position / SAMPLE_RATE * self.speed,
                           self.speed, count / SAMPLE_RATE,
-                          self.elapsed_origin + self.position / SAMPLE_RATE)
+                          self.elapsed_origin + self.position / SAMPLE_RATE))
             self.position += count
             if self.position >= len(self.audio):
                 self.finished_at = timing.outputBufferDacTime + count / SAMPLE_RATE
@@ -283,28 +308,33 @@ class Player:
             self.speed = speed
             self.origin = origin
             self.elapsed_origin = elapsed_origin
-            self.clock = None
+            self.clocks.clear()
             self.finished_at = None
 
     def clear(self):
         self.load(self.np.empty(0, dtype=self.np.float32), 1.0)
 
+    def _audible(self, now):
+        """Newest buffer already at the DAC; later ones are still queued ahead of it."""
+        for clock in reversed(self.clocks):
+            if clock[0] <= now:
+                return clock
+        return None
+
     def time_in_phrase(self, now):
         with self.lock:
-            if self.clock is None:
+            clock = self._audible(now)
+            if clock is None:
                 return None
-            dac, start, speed, duration, _ = self.clock
-            if now < dac:
-                return None
+            dac, start, speed, duration, _ = clock
             return start + min(now - dac, duration) * speed
 
     def elapsed_in_phrase(self, now):
         with self.lock:
-            if self.clock is None:
+            clock = self._audible(now)
+            if clock is None:
                 return None
-            dac, _, _, duration, elapsed = self.clock
-            if now < dac:
-                return None
+            dac, _, _, duration, elapsed = clock
             return elapsed + min(now - dac, duration)
 
     def next_elapsed_time(self):

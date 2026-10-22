@@ -58,6 +58,34 @@ class ReadAloudTests(unittest.TestCase):
         self.assertEqual(len(player.audio),0)
         self.assertTrue(player.done(100))  # speed change at the very end must not hang
 
+    def test_progress_tracks_audible_buffer_when_callbacks_run_ahead_of_dac(self):
+        # ALSA/PipeWire: each callback fills a buffer ~2 blocks before it is audible,
+        # so the newest buffer's DAC time is always in the future.
+        player=tts.Player(np)
+        player.load(np.ones(2400,dtype=np.float32),1.0)
+        out=np.zeros((480,1),dtype=np.float32)
+        for dac in (10.04,10.06,10.08):
+            player.callback(out,480,types.SimpleNamespace(outputBufferDacTime=dac),None)
+        self.assertIsNone(player.time_in_phrase(10.03))
+        self.assertAlmostEqual(player.time_in_phrase(10.05),0.01)
+        self.assertAlmostEqual(player.time_in_phrase(10.07),0.03)
+        self.assertAlmostEqual(player.elapsed_in_phrase(10.07),0.03)
+        player.load(np.ones(480,dtype=np.float32),1.0)
+        self.assertIsNone(player.time_in_phrase(10.07))  # a seek drops queued clocks
+
+    def test_backend_and_device_selection(self):
+        cuda=types.SimpleNamespace(cuda=types.SimpleNamespace(is_available=lambda: True))
+        cpu=types.SimpleNamespace(cuda=types.SimpleNamespace(is_available=lambda: False))
+        with patch.dict(tts.os.environ,{},clear=True):
+            self.assertEqual(tts.torch_device(cuda),'cuda')
+            self.assertEqual(tts.torch_device(cpu),'cpu')
+        with patch.dict(tts.os.environ,{'HERDR_TTS_DEVICE':'cpu'}):
+            self.assertEqual(tts.torch_device(cuda),'cpu')
+        with patch.object(tts.sys,'platform','darwin'), patch.object(tts.platform,'machine',return_value='arm64'):
+            self.assertTrue(tts.use_mlx())
+        with patch.object(tts.sys,'platform','linux'), patch.object(tts.platform,'machine',return_value='x86_64'):
+            self.assertFalse(tts.use_mlx())
+
     def test_speed_is_bounded_and_nan_is_safe(self):
         for value,expected in [(99,2.5),(-1,0.5),(1.2,1.2),(float('nan'),1.0)]:
             self.assertEqual(tts.speed_value(value),expected)

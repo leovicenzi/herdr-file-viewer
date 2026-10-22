@@ -8,11 +8,13 @@ All notable changes to this project are documented here. The format is based on
 ## [Unreleased]
 
 ### Added
+- Read-aloud on Linux x86_64: the bundled helper runs Kokoro on PyTorch (CUDA by default, CPU fallback, `HERDR_TTS_DEVICE` override) where macOS arm64 keeps MLX. `scripts/setup-tts.sh` provisions either. → [read-aloud](docs/read-aloud.md)
 - Read-aloud navigation: `(`/`)` skip phrases, `K`/`J` skip paragraphs/blocks, `g` reads from a selected passage or visible search match, and `F` toggles following playback. Seeks preserve pause/speed and can move before the original start. A bounded, document-scoped in-memory audio cache accelerates revisits. → [read-aloud](docs/read-aloud.md)
 - Markdown read-aloud joins visual soft line breaks before synthesis, retaining multi-line word/phrase highlights instead of pausing at each displayed line. Source hard breaks stay distinct from renderer padding. Oversized sentences prefer their last comma within the 240-character limit before falling back to a word boundary.
 - Local read-aloud with Kokoro/MLX: `t` reads or pauses, `T` stops, and `+`/`-` adjust pitch-preserving speed. Model-timed word highlighting, active-phrase shading, and viewport following work against the displayed text. Optional, offline after explicit setup; speech is cancelled on file/view changes. → [read-aloud](docs/read-aloud.md)
 
 ### Fixed
+- Read-aloud word highlighting no longer stalls until the end of each phrase on audio stacks that queue more than one buffer ahead of the DAC (ALSA/PipeWire). `scripts/setup-tts.sh` no longer aborts on a broken line continuation.
 - A repository can no longer run a program through a submodule `diff.external` (or, on older git, a submodule textconv) while a diff is shown. Nested submodule diffs stay a one-line gitlink summary. → [security](SECURITY.md)
 - The `?` Keybindings list and the remappable-actions table now describe `L` as tree-scroll or line-select, and `Tab` as cycling tree, active preview, and pinned preview. → [keys](docs/keys.md) · [configuration](docs/configuration.md#keybindings)
 - Reading a repository's filter configuration no longer waits forever when an included file does not return. The read gives up after a short budget and git features are unavailable in that repository, rather than running git with an unknown filter set.

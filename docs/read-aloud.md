@@ -1,10 +1,17 @@
-# Local read-aloud (Apple Silicon)
+# Local read-aloud
 
 This optional feature reads the **displayed text**, locally, using the Apache-2.0
-[Kokoro 82M](https://huggingface.co/hexgrad/Kokoro-82M) model via
-[MLX Audio](https://github.com/Blaizzy/mlx-audio). Kokoro is small enough for a
-16 GB Mac and much lighter than voice-cloning/conversational models. The bundled
-backend uses `mlx-community/Kokoro-82M-bf16`, American English voice `af_heart`.
+[Kokoro 82M](https://huggingface.co/hexgrad/Kokoro-82M) model, American English
+voice `af_heart`. Kokoro is much lighter than voice-cloning/conversational models.
+The bundled helper picks its inference backend by platform:
+
+| Platform | Backend | Model |
+| --- | --- | --- |
+| macOS arm64 | [MLX Audio](https://github.com/Blaizzy/mlx-audio) on the Apple GPU | `mlx-community/Kokoro-82M-bf16` |
+| Linux x86_64 | [`kokoro`](https://github.com/hexgrad/kokoro) on PyTorch: CUDA when an NVIDIA GPU is available, else CPU | `hexgrad/Kokoro-82M` |
+
+Both use the same Misaki phonemizer and report the same token timestamps, so word
+highlighting behaves identically.
 
 ## One-time setup
 
@@ -12,21 +19,30 @@ Install `uv` and FFmpeg, then provision the optional Python environment and mode
 from the plugin's **trusted checkout**, not from a browsed repository:
 
 ```sh
-brew install uv ffmpeg
+brew install uv ffmpeg            # macOS
+sudo pacman -S uv ffmpeg portaudio  # Linux (or your package manager)
 sh scripts/setup-tts.sh
 cargo build --release
 ```
 
-Setup downloads packages, model weights, voices, and English language data. It does
-not play sound. Python 3.11 is isolated in `.venv-tts` (gitignored); no system Python
-packages are changed. MLX performs neural inference on Apple Silicon; the optional
-phonemizer also brings its own Python dependencies, including PyTorch. Playback
+Setup downloads packages, model weights, voices, and English language data, then
+warms the model without playing sound. Python (3.11 on macOS, 3.12 on Linux) is
+isolated in `.venv-tts` (gitignored); no system Python packages are changed. On Linux,
+setup installs the CUDA 13 PyTorch build (several GB, needs an NVIDIA driver that
+supports CUDA 13). Set `TTS_TORCH_INDEX=cpu` before running setup for a much smaller
+CPU-only install; Kokoro 82M still runs about real time on a modern CPU, though
+first-phrase and uncached-seek latency is higher. Playback
 sets `HF_HUB_OFFLINE=1`: it neither downloads data nor sends your documents to a
 service. Text/audio remain in memory and are discarded on stop/exit. The weights
-are cached by Hugging Face, as with other local MLX models.
+are cached by Hugging Face.
 
-The bundled runtime is **macOS arm64 only**. Other platforms still build and browse
-normally, and can supply another backend using `tts_command`. Missing setup,
+On Linux, `HERDR_TTS_DEVICE` (in the helper's environment) overrides the PyTorch
+device, e.g. `cpu` to leave a hybrid laptop's discrete GPU asleep. A warm CUDA
+context keeps the GPU powered while the helper runs, which is from the first `t` until
+the viewer exits (`T` stops playback but keeps the model warm).
+
+The bundled runtime supports **macOS arm64 and Linux x86_64**. Other platforms still
+build and browse normally, and can supply another backend using `tts_command`. Missing setup,
 missing output devices, and synthesis failures produce an in-app notice rather
 than terminating the viewer. The helper starts only on the first explicit read.
 
@@ -119,7 +135,7 @@ The new global actions are remappable; line-select's local controls remain fixed
 
 ## Timing and performance
 
-One worker keeps the model warm and prefetches at most two phrases (maximum 240
+One worker keeps the model warm (MLX or PyTorch) and prefetches at most two phrases (maximum 240
 characters each). Initial model/phonemizer loading and the first GPU generation
 are slower; subsequent phrases reuse them. No model work runs on the UI thread.
 A document-scoped LRU retains at most **16 phrases / 16 MiB of original-speed PCM**,
@@ -128,10 +144,11 @@ prefetch buffers; no whole-document audio is retained. Rapid seeks coalesce in
 both the non-blocking Rust command mailbox and the helper's one-job queue, so
 holding a skip key does not accumulate full-text requests. Repeats can reuse cached
 synthesis at any playback speed. Stop, document replacement, and process exit
-release the cache. An in-flight MLX operation cannot always be interrupted; its
+release the cache. An in-flight model call cannot always be interrupted; its
 stale output is discarded, but it may briefly delay an uncached destination.
 Audio uses 20 ms PortAudio callbacks. Highlight position comes from the audio
-output's DAC clock and Kokoro's predicted token timestamps, **not words-per-minute
+output's DAC clock (the helper tracks every buffer queued ahead of the DAC, since
+ALSA/PipeWire run two or more blocks ahead where CoreAudio runs about one) and Kokoro's predicted token timestamps, **not words-per-minute
 estimates**. Phonemizer-normalized tokens that cannot be mapped back exactly keep
 only the phrase highlight; no guessed word is painted.
 

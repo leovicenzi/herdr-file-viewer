@@ -299,7 +299,7 @@ pub fn settings_text(
             .tts_command
             .as_ref()
             .map(|a| a.join(" "))
-            .unwrap_or_else(|| "bundled Kokoro/MLX helper".into()),
+            .unwrap_or_else(|| "bundled Kokoro helper".into()),
         tts_speed = eff.tts_speed,
         hide_dotfiles = eff.hide_dotfiles,
         show_ignored = eff.show_ignored,

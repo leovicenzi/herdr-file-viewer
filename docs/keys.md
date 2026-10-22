@@ -27,7 +27,7 @@ is additive and on by default.
 | `D` (Shift+`d`) | In Diff/FullDiff views, cycle diff presentation through `delta` unified, side-by-side, and plain, unstyled `git diff` text |
 | `v` | Cycle the content view mode |
 | `e` | Open the selected file in `$EDITOR` (see [Opening in an editor](#opening-in-an-editor)) |
-| `t` | **Read aloud** from the phrase at the top visible line of the active preview; press again to pause/resume. Local Kokoro/MLX with word highlighting; see [setup](read-aloud.md) |
+| `t` | **Read aloud** from the phrase at the top visible line of the active preview; press again to pause/resume. Local Kokoro (MLX on Apple Silicon, PyTorch/CUDA on Linux) with word highlighting; see [setup](read-aloud.md) |
 | `T` (Shift+`t`) | Stop read-aloud and clear its highlight |
 | `+` | Increase read-aloud speed by 0.1× (up to 2.5×), preserving pitch |
 | `-` | Decrease read-aloud speed by 0.1× (down to 0.5×), preserving pitch |
