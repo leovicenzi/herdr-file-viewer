@@ -112,6 +112,7 @@ impl Controller {
             }),
             line_select: None,
             selection: None,
+            speech: None,
             origin: Some(pin.document.origin().clone()),
         })
     }

@@ -1,7 +1,7 @@
 //! The line-select modal: its in-progress selection state, the enter/exit transitions on the
-//! Controller, and the two confirm paths. `Enter` copies the selection's `path:line` /
+//! Controller, and the copy/read confirm paths. `Enter` copies the selection's `path:line` /
 //! `path:start-end` REFERENCE, while `y`/`Y` copy the selected lines' CONTENT (the actual file
-//! text). One selection, two products, one keystroke apart.
+//! text). `g` starts read-aloud at the selection's containing phrase without copying.
 
 use super::*;
 use ratatui::buffer::CellWidth;
@@ -562,8 +562,9 @@ impl Controller {
     /// stays visible (AC-7). `Esc` exits without copying (AC-4); `Enter` copies the `path:line`
     /// REFERENCE and closes the mode ([`copy_line_reference`](Self::copy_line_reference), AC-9);
     /// `y`/`Y` copy the selected CONTENT instead
-    /// ([`copy_line_content`](Self::copy_line_content)): one selection, two products. Any other key
-    /// is inert. Ctrl/Alt chords are rejected up
+    /// ([`copy_line_content`](Self::copy_line_content)): one selection, two copy products.
+    /// `g` reads from the selection's containing phrase and closes the modal. Other keys
+    /// outside these confirms and selection movement are inert. Ctrl/Alt chords are rejected up
     /// front so a reserved combo never moves the marker; Shift is meaningful (extend / shifted
     /// arrows) and is allowed.
     pub fn handle_line_select_key(&mut self, key: KeyEvent) -> Effects {
@@ -574,6 +575,11 @@ impl Controller {
         }
         let shift = key.modifiers.contains(KeyModifiers::SHIFT);
 
+        // Like the local annotation/yank controls, this is fixed inside L mode.
+        // In normal browsing the registry's speech_read_here action is remappable.
+        if key.code == KeyCode::Char('g') && key.modifiers == KeyModifiers::NONE {
+            return self.read_speech_here();
+        }
         match key.code {
             KeyCode::Esc => {
                 self.exit_line_select(); // AC-4: close, copy nothing, scroll unchanged

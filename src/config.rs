@@ -144,6 +144,10 @@ pub struct Config {
     pub syntax: Option<String>,
     pub open: Option<String>,
     pub reveal: Option<String>,
+    /// Optional argv command implementing the local JSON-lines speech protocol (no shell).
+    pub tts_command: Option<String>,
+    /// Initial read-aloud playback speed, clamped to 0.5–2.5.
+    pub tts_speed: Option<f64>,
     pub hide_dotfiles: Option<bool>,
     /// Whether gitignored (and git-excluded) entries are shown at startup, exactly as if `i` had
     /// already been pressed once. `None` falls back to `false` (the default: ignored entries
@@ -329,7 +333,7 @@ pub fn load_config_from_env() -> (Config, LoadOutcome) {
 /// precedence (AC-3, AC-4, AC-5). `None` on a renderer/opener field means "use the built-in
 /// default"; `None` on `editor` means no editor is configured at all (a platform default, if
 /// any, is applied later at wiring time).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct EffectiveSettings {
     pub editor: Option<std::ffi::OsString>,
     pub markdown: Option<Vec<String>>,
@@ -337,6 +341,8 @@ pub struct EffectiveSettings {
     pub syntax: Option<Vec<String>>,
     pub open: Option<Vec<String>>,
     pub reveal: Option<Vec<String>>,
+    pub tts_command: Option<Vec<String>>,
+    pub tts_speed: f64,
     pub hide_dotfiles: bool,
     /// The effective **show-ignored-at-startup** switch: the config `show_ignored` when present,
     /// else `false`. Seeds the tree exactly as if `i` had already been pressed once; the
@@ -566,6 +572,11 @@ pub fn resolve(config: &Config, get_env: impl Fn(&str) -> Option<String>) -> Eff
         syntax,
         open,
         reveal,
+        tts_command: config
+            .tts_command
+            .as_deref()
+            .map(crate::editor::tokenize_command),
+        tts_speed: crate::speech::clamp_speed(config.tts_speed.unwrap_or(1.0)),
         hide_dotfiles,
         show_ignored,
         compact_dirs,

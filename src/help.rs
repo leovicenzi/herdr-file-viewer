@@ -275,6 +275,8 @@ pub fn settings_text(
          editor            = {editor}\n\
          open              = {open}\n\
          reveal            = {reveal}\n\
+         tts_command       = {tts_command}\n\
+         tts_speed         = {tts_speed}\n\
          hide_dotfiles     = {hide_dotfiles}\n\
          show_ignored      = {show_ignored}\n\
          compact_dirs      = {compact_dirs}\n\
@@ -293,6 +295,12 @@ pub fn settings_text(
          preview_max_kib   = {preview_max_kib}",
         open = open,
         reveal = reveal,
+        tts_command = eff
+            .tts_command
+            .as_ref()
+            .map(|a| a.join(" "))
+            .unwrap_or_else(|| "bundled Kokoro/MLX helper".into()),
+        tts_speed = eff.tts_speed,
         hide_dotfiles = eff.hide_dotfiles,
         show_ignored = eff.show_ignored,
         compact_dirs = eff.compact_dirs,
@@ -804,6 +812,8 @@ mod tests {
             syntax: None,
             open: None,
             reveal: None,
+            tts_command: None,
+            tts_speed: 1.0,
             hide_dotfiles: true,
             show_ignored: true,
             compact_dirs: true,
@@ -849,6 +859,8 @@ mod tests {
             "editor",
             "open",
             "reveal",
+            "tts_command",
+            "tts_speed",
             "hide_dotfiles",
             "show_ignored",
             "compact_dirs",

@@ -11414,6 +11414,8 @@ fn open_help_orders_optional_sections_after_whats_new_and_keeps_independent_scro
         syntax: None,
         open: None,
         reveal: None,
+        tts_command: None,
+        tts_speed: 1.0,
         hide_dotfiles: false,
         show_ignored: false,
         compact_dirs: false,

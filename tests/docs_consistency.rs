@@ -144,6 +144,8 @@ fn config_example_documents_every_config_key() {
     // demoting a key to prose only) without documenting it in the example fails the build. Keep this
     // list in lockstep with `Config`'s fields in `src/config.rs`.
     for key in [
+        "tts_command",
+        "tts_speed",
         "editor",
         "markdown",
         "diff",
@@ -336,6 +338,8 @@ fn configuration_doc_documents_config_file() {
         "docs/configuration.md must document the XDG fallback location"
     );
     for key in [
+        "tts_command",
+        "tts_speed",
         "editor",
         "markdown",
         "diff",

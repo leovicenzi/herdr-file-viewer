@@ -214,6 +214,10 @@
 # keys handled inside a modal (the finder query, the `:` / `/` prompt, line-select
 # mode) keep their own keys.
 #
+# Local, offline read-aloud (run scripts/setup-tts.sh first on Apple Silicon).
+# tts_speed = 1.0
+# tts_command = '/absolute/plugin/.venv-tts/bin/python -u /absolute/plugin/scripts/read_aloud.py'
+
 #[keys]
 #refresh = "g"              # `g` refreshes; the default `r` no longer does
 #nav_up = ["w", "Up"]       # bind several keys at once (the default `k` is dropped)

@@ -32,6 +32,7 @@ mod mouse;
 mod picker;
 mod pinned;
 mod project_search;
+mod speech;
 
 use crate::annotation::AnnotationStore;
 use crate::finder::FinderState;
@@ -1033,6 +1034,8 @@ pub struct Controller {
     /// Keybindings overlay can surface which bindings were ignored (AC-16). Empty until
     /// [`set_keybindings`](Self::set_keybindings) forwards the resolver's outcome.
     key_load_outcome: crate::input::KeyLoadOutcome,
+    /// Session-only local audio and displayed-text highlighting, with an injected backend.
+    speech: crate::speech::ReadAloud,
 }
 
 impl Controller {
@@ -1173,6 +1176,7 @@ impl Controller {
             // config's `[keys]` overrides via `set_keybindings`; tests inherit these unchanged.
             bindings: crate::input::default_bindings(),
             key_load_outcome: crate::input::KeyLoadOutcome::default(),
+            speech: crate::speech::ReadAloud::default(),
         };
         // Bound the tree's ancestor `.gitignore` search at this repo's own boundary rather than
         // letting it climb into an unrelated enclosing directory/repository (see
@@ -2135,6 +2139,7 @@ impl Controller {
                     }),
                 line_select,
                 selection,
+                speech: self.speech.highlight.clone(),
                 origin: None,
             },
             pinned: self.pinned_projection(),
@@ -2206,7 +2211,7 @@ impl Controller {
                 }
             }
         } else {
-            self.search_status_line()
+            self.search_status_line().or_else(|| self.speech.status())
         }
     }
 
@@ -2373,6 +2378,25 @@ impl Controller {
                 Focus::Pinned => Effects::noop(),
             },
             Intent::ShowHelp => self.open_help(),
+            Intent::ToggleSpeech => self.toggle_speech(),
+            Intent::SpeechReadHere => self.read_speech_here(),
+            Intent::SpeechToggleFollow => self.toggle_speech_follow(),
+            Intent::SpeechNextPhrase
+            | Intent::SpeechPreviousPhrase
+            | Intent::SpeechNextParagraph
+            | Intent::SpeechPreviousParagraph => self.skip_speech(intent),
+            Intent::StopSpeech => {
+                self.speech.stop();
+                Effects::redraw()
+            }
+            Intent::SpeechFaster => {
+                self.speech.adjust_speed(0.1);
+                Effects::redraw()
+            }
+            Intent::SpeechSlower => {
+                self.speech.adjust_speed(-0.1);
+                Effects::redraw()
+            }
             Intent::Close => self.close_or_unzoom(),
         }
     }
@@ -3005,6 +3029,7 @@ impl Controller {
     }
 
     fn open_in_editor(&mut self) -> Effects {
+        self.speech.stop();
         let Some(node) = self.tree.selected() else {
             return Effects::noop();
         };
@@ -3609,6 +3634,7 @@ impl Controller {
     /// applies the result by `seq` and, seeing it flagged in `reflow_seq`, keeps the scroll and
     /// recomputes an active search.
     fn dispatch_reflow(&mut self, path: PathBuf, mode: ViewMode) {
+        self.speech.stop(); // Displayed-text coordinates change on Markdown reflow.
         self.latest_seq += 1;
         let seq = self.latest_seq;
         self.reflow_seq = Some(seq);
@@ -3650,6 +3676,7 @@ impl Controller {
     /// the pane synchronously (no job). Every call bumps `latest_seq`, so any still-in-flight
     /// render for the previous selection is superseded and dropped by [`poll`].
     fn dispatch_render(&mut self) {
+        self.speech.stop();
         self.latest_seq += 1;
         let seq = self.latest_seq;
         // A fresh render means new content — start it at the top-left, never inheriting the
@@ -3768,7 +3795,8 @@ impl Controller {
     /// dispatched selection (stale results are discarded). Returns `Some` redraw effect when
     /// fresh content was applied, so the run loop repaints; `None` when nothing arrived.
     pub fn poll(&mut self) -> Option<Effects> {
-        let mut applied = self.modal.finder_mut().is_some_and(FinderState::poll);
+        let mut applied = self.poll_speech();
+        applied |= self.modal.finder_mut().is_some_and(FinderState::poll);
         if self
             .modal
             .finder_mut()

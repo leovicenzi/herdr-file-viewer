@@ -529,6 +529,76 @@ pub(crate) const REGISTRY: &[Binding] = &[
         category: "Session",
     },
     Binding {
+        intent: Intent::ToggleSpeech,
+        name: "toggle_speech",
+        default_keys: &[KeyCode::Char('t')],
+        description: "Read aloud from the visible text, or pause/resume reading.",
+        category: "Open & copy",
+    },
+    Binding {
+        intent: Intent::StopSpeech,
+        name: "stop_speech",
+        default_keys: &[KeyCode::Char('T')],
+        description: "Stop reading aloud and clear the spoken highlight.",
+        category: "Open & copy",
+    },
+    Binding {
+        intent: Intent::SpeechFaster,
+        name: "speech_faster",
+        default_keys: &[KeyCode::Char('+')],
+        description: "Increase reading speed by 0.1x (maximum 2.5x).",
+        category: "Open & copy",
+    },
+    Binding {
+        intent: Intent::SpeechSlower,
+        name: "speech_slower",
+        default_keys: &[KeyCode::Char('-')],
+        description: "Decrease reading speed by 0.1x (minimum 0.5x).",
+        category: "Open & copy",
+    },
+    Binding {
+        intent: Intent::SpeechNextPhrase,
+        name: "speech_next_phrase",
+        default_keys: &[KeyCode::Char(')')],
+        description: "Skip to the next spoken phrase (preserves pause and speed).",
+        category: "Open & copy",
+    },
+    Binding {
+        intent: Intent::SpeechPreviousPhrase,
+        name: "speech_previous_phrase",
+        default_keys: &[KeyCode::Char('(')],
+        description: "Restart after two seconds, otherwise go to the previous spoken phrase.",
+        category: "Open & copy",
+    },
+    Binding {
+        intent: Intent::SpeechNextParagraph,
+        name: "speech_next_paragraph",
+        default_keys: &[KeyCode::Char('J')],
+        description: "Skip playback to the next paragraph/block.",
+        category: "Open & copy",
+    },
+    Binding {
+        intent: Intent::SpeechPreviousParagraph,
+        name: "speech_previous_paragraph",
+        default_keys: &[KeyCode::Char('K')],
+        description: "Skip playback to the preceding paragraph/block.",
+        category: "Open & copy",
+    },
+    Binding {
+        intent: Intent::SpeechReadHere,
+        name: "speech_read_here",
+        default_keys: &[KeyCode::Char('g')],
+        description: "Read from the selection, visible search match, or top visible phrase.",
+        category: "Open & copy",
+    },
+    Binding {
+        intent: Intent::SpeechToggleFollow,
+        name: "speech_toggle_follow",
+        default_keys: &[KeyCode::Char('F')],
+        description: "Toggle following playback; turn off to browse independently.",
+        category: "Open & copy",
+    },
+    Binding {
         intent: Intent::Close,
         name: "close",
         default_keys: &[KeyCode::Char('q'), KeyCode::Esc],
@@ -870,6 +940,16 @@ mod tests {
         (KeyCode::Char('r'), Intent::Refresh),
         (KeyCode::Char('u'), Intent::DismissUpdate),
         (KeyCode::Char('?'), Intent::ShowHelp),
+        (KeyCode::Char('t'), Intent::ToggleSpeech),
+        (KeyCode::Char('T'), Intent::StopSpeech),
+        (KeyCode::Char('+'), Intent::SpeechFaster),
+        (KeyCode::Char('-'), Intent::SpeechSlower),
+        (KeyCode::Char(')'), Intent::SpeechNextPhrase),
+        (KeyCode::Char('('), Intent::SpeechPreviousPhrase),
+        (KeyCode::Char('J'), Intent::SpeechNextParagraph),
+        (KeyCode::Char('K'), Intent::SpeechPreviousParagraph),
+        (KeyCode::Char('g'), Intent::SpeechReadHere),
+        (KeyCode::Char('F'), Intent::SpeechToggleFollow),
         (KeyCode::Char('q'), Intent::Close),
         (KeyCode::Esc, Intent::Close),
     ];
@@ -992,8 +1072,34 @@ mod tests {
     }
 
     #[test]
+    fn speech_navigation_actions_remap_and_shifted_letters_decode() {
+        for (name, intent) in [
+            ("speech_next_phrase", Intent::SpeechNextPhrase),
+            ("speech_previous_phrase", Intent::SpeechPreviousPhrase),
+            ("speech_next_paragraph", Intent::SpeechNextParagraph),
+            ("speech_previous_paragraph", Intent::SpeechPreviousParagraph),
+            ("speech_read_here", Intent::SpeechReadHere),
+            ("speech_toggle_follow", Intent::SpeechToggleFollow),
+        ] {
+            let (bindings, outcome) = resolve_with(&[(name, one("M"))]);
+            assert!(outcome.rejected.is_empty());
+            assert_eq!(dec(&bindings, KeyCode::Char('M')), Some(intent));
+        }
+        for (ch, intent) in [
+            ('j', Intent::SpeechNextParagraph),
+            ('k', Intent::SpeechPreviousParagraph),
+            ('f', Intent::SpeechToggleFollow),
+        ] {
+            assert_eq!(
+                map_key(KeyEvent::new(KeyCode::Char(ch), KeyModifiers::SHIFT)),
+                Some(intent)
+            );
+        }
+    }
+
+    #[test]
     fn unmapped_keys_are_a_noop() {
-        assert_eq!(map_key(k(KeyCode::Char('g'))), None);
+        assert_eq!(map_key(k(KeyCode::Char('M'))), None);
         assert_eq!(map_key(k(KeyCode::Char('m'))), None);
         assert_eq!(map_key(k(KeyCode::F(1))), None);
         assert_eq!(map_key(k(KeyCode::Backspace)), None);
@@ -1792,8 +1898,8 @@ mod tests {
         assert_eq!(dec(&b, KeyCode::Char('f')), Some(Intent::OpenFinder));
         assert_eq!(
             dec(&b, KeyCode::Char('g')),
-            None,
-            "the clashed key 'g' decodes to nothing"
+            Some(Intent::SpeechReadHere),
+            "rejected custom claims leave the new default 'g' action untouched"
         );
     }
 
@@ -1808,8 +1914,8 @@ mod tests {
         );
         assert_eq!(
             dec(&b, KeyCode::Char('g')),
-            None,
-            "the whole entry is rejected, so its parseable key 'g' is not bound"
+            Some(Intent::SpeechReadHere),
+            "the whole entry is rejected, so 'g' keeps its default instead of rebinding"
         );
         assert_eq!(dec(&b, KeyCode::Char('r')), Some(Intent::Refresh));
     }

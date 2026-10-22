@@ -1,5 +1,8 @@
 # Rust build output
 /target
+/.venv-tts/
+__pycache__/
+*.pyc
 
 # macOS / AppleDouble
 .DS_Store

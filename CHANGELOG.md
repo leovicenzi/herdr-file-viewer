@@ -7,6 +7,11 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Added
+- Read-aloud navigation: `(`/`)` skip phrases, `K`/`J` skip paragraphs/blocks, `g` reads from a selected passage or visible search match, and `F` toggles following playback. Seeks preserve pause/speed and can move before the original start. A bounded, document-scoped in-memory audio cache accelerates revisits. → [read-aloud](docs/read-aloud.md)
+- Markdown read-aloud joins visual soft line breaks before synthesis, retaining multi-line word/phrase highlights instead of pausing at each displayed line. Source hard breaks stay distinct from renderer padding. Oversized sentences prefer their last comma within the 240-character limit before falling back to a word boundary.
+- Local read-aloud with Kokoro/MLX: `t` reads or pauses, `T` stops, and `+`/`-` adjust pitch-preserving speed. Model-timed word highlighting, active-phrase shading, and viewport following work against the displayed text. Optional, offline after explicit setup; speech is cancelled on file/view changes. → [read-aloud](docs/read-aloud.md)
+
 ### Fixed
 - A repository can no longer run a program through a submodule `diff.external` (or, on older git, a submodule textconv) while a diff is shown. Nested submodule diffs stay a one-line gitlink summary. → [security](SECURITY.md)
 - The `?` Keybindings list and the remappable-actions table now describe `L` as tree-scroll or line-select, and `Tab` as cycling tree, active preview, and pinned preview. → [keys](docs/keys.md) · [configuration](docs/configuration.md#keybindings)
