@@ -59,6 +59,8 @@ pub struct PreviewProjection {
     pub search: Option<ContentSearch>,
     pub line_select: Option<LineSelectView>,
     pub selection: Option<CharSelView>,
+    /// Model-timed read-aloud phrase and word in displayed UTF-8 coordinates.
+    pub speech: Option<crate::speech::SpeechHighlight>,
     /// `Some` only for a pinned snapshot. It is rendered as its own sanitized identity title.
     pub origin: Option<PreviewOrigin>,
 }
@@ -80,6 +82,7 @@ impl PreviewProjection {
             search: None,
             line_select: None,
             selection: None,
+            speech: None,
             origin: None,
         }
     }
@@ -1221,12 +1224,19 @@ fn draw_content(
     let annotated =
         (!ranges.is_empty()).then(|| apply_annotation_lines(&preview.content.lines, ranges));
     let base: &[Line<'static>] = annotated.as_deref().unwrap_or(&preview.content.lines);
+    let spoken = preview
+        .speech
+        .as_ref()
+        .map(|mark| crate::speech::highlight(base, mark));
+    let base: &[Line<'static>] = spoken.as_deref().unwrap_or(base);
     let content_text = if active && let Some(ls) = &preview.line_select {
         ratatui::text::Text::from(apply_line_select(base, ls))
     } else if active && let Some(cs) = &preview.selection {
         ratatui::text::Text::from(apply_char_selection(base, cs))
     } else if let Some(cs) = &preview.search {
         ratatui::text::Text::from(crate::highlight::apply(base, &cs.matches, cs.current))
+    } else if let Some(spoken) = spoken {
+        ratatui::text::Text::from(spoken)
     } else if let Some(annotated) = annotated {
         ratatui::text::Text::from(annotated)
     } else {

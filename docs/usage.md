@@ -1,5 +1,17 @@
 # Usage guide
 
+## Reading aloud
+
+Press `t` to read the visible active preview locally with Kokoro (MLX on Apple Silicon, PyTorch/CUDA on Linux). Press `t` again
+to pause/resume, `T` to stop, and `+`/`-` to adjust speed without changing pitch.
+The current word is highlighted against the displayed text, with a shaded active phrase.
+Use `(`/`)` for previous/next phrase and `K`/`J` for previous/next paragraph/block.
+`g` reads from the phrase containing your selection or visible search match (otherwise
+from the viewport top), preserving pause and speed. Turn follow off with `F` to
+browse independently while listening, and on again to reveal the playback position.
+See [Read-aloud](read-aloud.md) for setup, scope, and timing limitations.
+
+
 This guide explains each viewer feature. See the [keys reference](keys.md) for exact keys and mouse
 gestures, [summoning](summoning.md) to open the viewer, and [configuration](configuration.md) to
 customize it.

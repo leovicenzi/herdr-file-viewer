@@ -1,0 +1,257 @@
+"""Hermetic helper tests: no model loads, network requests, or audio devices."""
+import io
+import json
+import types
+import unittest
+from unittest.mock import patch
+
+import numpy as np
+import read_aloud as tts
+
+
+class ReadAloudTests(unittest.TestCase):
+    def test_utf8_word_mapping_and_repeated_words(self):
+        tokens = [types.SimpleNamespace(text=text, start_ts=i, end_ts=i+0.5)
+                  for i, text in enumerate(["Olá", "go", "go", "normalized-missing"])]
+        self.assertEqual(tts.word_marks("Olá go go", tokens),
+                         [(0,0.5,0,4),(1,1.5,5,7),(2,2.5,8,10)])
+
+    def test_missing_timestamps_do_not_invent_alignment(self):
+        token = types.SimpleNamespace(text="hello", start_ts=None, end_ts=None)
+        self.assertEqual(tts.word_marks("hello", [token]), [])
+
+    def test_callback_progress_is_dac_clock_based(self):
+        player = tts.Player(np)
+        player.load(np.ones(24000,dtype=np.float32),1.5)
+        out=np.zeros((480,1),dtype=np.float32)
+        player.callback(out,480,types.SimpleNamespace(outputBufferDacTime=10.0),None)
+        self.assertIsNone(player.time_in_phrase(9.99))
+        self.assertAlmostEqual(player.time_in_phrase(10.01),0.015)
+        self.assertAlmostEqual(player.time_in_phrase(11),0.03)  # clamps to queued samples
+        self.assertEqual(float(out.sum()),480)
+        self.assertAlmostEqual(player.next_source_time(),0.03)
+
+    def test_pause_outputs_silence_without_advancing_and_resume_keeps_position(self):
+        player = tts.Player(np)
+        player.load(np.ones(960,dtype=np.float32),1.0)
+        out=np.zeros((480,1),dtype=np.float32)
+        timing=types.SimpleNamespace(outputBufferDacTime=1.0)
+        player.paused=True
+        player.callback(out,480,timing,None)
+        self.assertEqual(player.position,0)
+        self.assertEqual(out.sum(),0)
+        player.paused=False
+        player.callback(out,480,timing,None)
+        self.assertEqual(player.position,480)
+        self.assertFalse(player.done(1.02))
+        timing.outputBufferDacTime=1.02
+        player.callback(out,480,timing,None)
+        self.assertFalse(player.done(1.03))
+        self.assertTrue(player.done(1.04))
+
+    def test_load_and_clear_reset_timing(self):
+        player=tts.Player(np)
+        player.load(np.ones(480,dtype=np.float32),2.0,origin=3.0)
+        self.assertAlmostEqual(player.next_source_time(),3.0)
+        player.clear()
+        self.assertIsNone(player.time_in_phrase(100))
+        self.assertEqual(len(player.audio),0)
+        self.assertTrue(player.done(100))  # speed change at the very end must not hang
+
+    def test_progress_tracks_audible_buffer_when_callbacks_run_ahead_of_dac(self):
+        # ALSA/PipeWire: each callback fills a buffer ~2 blocks before it is audible,
+        # so the newest buffer's DAC time is always in the future.
+        player=tts.Player(np)
+        player.load(np.ones(2400,dtype=np.float32),1.0)
+        out=np.zeros((480,1),dtype=np.float32)
+        for dac in (10.04,10.06,10.08):
+            player.callback(out,480,types.SimpleNamespace(outputBufferDacTime=dac),None)
+        self.assertIsNone(player.time_in_phrase(10.03))
+        self.assertAlmostEqual(player.time_in_phrase(10.05),0.01)
+        self.assertAlmostEqual(player.time_in_phrase(10.07),0.03)
+        self.assertAlmostEqual(player.elapsed_in_phrase(10.07),0.03)
+        player.load(np.ones(480,dtype=np.float32),1.0)
+        self.assertIsNone(player.time_in_phrase(10.07))  # a seek drops queued clocks
+
+    def test_backend_and_device_selection(self):
+        cuda=types.SimpleNamespace(cuda=types.SimpleNamespace(is_available=lambda: True))
+        cpu=types.SimpleNamespace(cuda=types.SimpleNamespace(is_available=lambda: False))
+        with patch.dict(tts.os.environ,{},clear=True):
+            self.assertEqual(tts.torch_device(cuda),'cuda')
+            self.assertEqual(tts.torch_device(cpu),'cpu')
+        with patch.dict(tts.os.environ,{'HERDR_TTS_DEVICE':'cpu'}):
+            self.assertEqual(tts.torch_device(cuda),'cpu')
+        with patch.object(tts.sys,'platform','darwin'), patch.object(tts.platform,'machine',return_value='arm64'):
+            self.assertTrue(tts.use_mlx())
+        with patch.object(tts.sys,'platform','linux'), patch.object(tts.platform,'machine',return_value='x86_64'):
+            self.assertFalse(tts.use_mlx())
+
+    def test_speed_is_bounded_and_nan_is_safe(self):
+        for value,expected in [(99,2.5),(-1,0.5),(1.2,1.2),(float('nan'),1.0)]:
+            self.assertEqual(tts.speed_value(value),expected)
+
+    def test_time_stretch_uses_pipes_pitch_preserving_filters_and_timeout(self):
+        audio=np.ones(100,dtype=np.float32)
+        with patch.object(tts.subprocess,'run',return_value=types.SimpleNamespace(stdout=audio.tobytes())) as run:
+            tts.stretch(audio,2.5,np)
+        args,kwargs=run.call_args
+        self.assertIn('atempo=2.0,atempo=1.25',args[0])
+        self.assertEqual(kwargs['timeout'],5)
+        self.assertEqual(kwargs['input'],audio.tobytes())
+        self.assertNotIn('shell',kwargs)
+        self.assertIs(tts.stretch(audio,1.0,np),audio)
+
+    def test_protocol_stdout_is_independent_of_library_stdout_redirection(self):
+        original, diagnostics=io.StringIO(),io.StringIO()
+        with patch.object(tts,'PROTOCOL_OUT',original):
+            with tts.contextlib.redirect_stdout(diagnostics):
+                print('library diagnostics')
+                tts.emit('done',42)
+        self.assertEqual(json.loads(original.getvalue()),dict(event='done',id=42))
+        self.assertEqual(diagnostics.getvalue(),'library diagnostics\n')
+
+
+class NavigationTests(unittest.TestCase):
+    def job(self, ident=1, document=10, offset=4, paused=False, text='Hello.'):
+        return dict(cmd='speak', id=ident, document=document, offset=offset,
+                    paused=paused, speed=1.0, chunks=[dict(text=text)])
+
+    def test_lru_limits_pcm_bytes_promotes_hits_and_rejects_oversized_audio(self):
+        cache=tts.AudioCache(max_bytes=16,max_phrases=2)
+        cache.reset(10)
+        audio=np.ones(2,dtype=np.float32)
+        cache.put(10,0,'zero',audio,[])
+        cache.put(10,1,'one',audio,[])
+        self.assertIsNotNone(cache.get(10,0,'zero'))  # zero is now most recent
+        cache.put(10,2,'two',audio,[])
+        self.assertIsNone(cache.get(10,1,'one'))
+        self.assertIsNotNone(cache.get(10,0,'zero'))
+        self.assertEqual(cache.bytes,16)
+        cache.put(10,3,'huge',np.ones(10,dtype=np.float32),[])
+        self.assertIsNone(cache.get(10,3,'huge'))
+        self.assertLessEqual(cache.bytes,16)
+        self.assertEqual(len(cache.entries),2)
+
+    def test_entry_limit_is_enforced_independently_of_byte_limit(self):
+        cache=tts.AudioCache(max_bytes=1000,max_phrases=2)
+        cache.reset(10)
+        for i in range(5): cache.put(10,i,str(i),np.ones(1,dtype=np.float32),[])
+        self.assertEqual(list(cache.entries),[3,4])
+        self.assertEqual(cache.bytes,8)
+
+    def test_cache_is_text_checked_document_scoped_and_stale_generation_cannot_reinsert(self):
+        cache=tts.AudioCache()
+        cache.reset(10);audio=np.ones(5,dtype=np.float32)
+        cache.put(10,0,'Hello.',audio,[])
+        self.assertIsNone(cache.get(10,0,'Changed text.'))
+        cache.reset(11)
+        cache.put(10,0,'Hello.',audio,[])
+        self.assertIsNone(cache.get(10,0,'Hello.'))
+        self.assertEqual(cache.bytes,0)
+        cache.put(11,0,'New.',audio,[])
+        cache.reset(None)
+        cache.put(11,0,'New.',audio,[])
+        self.assertEqual(cache.bytes,0)
+
+    def test_paused_seek_clears_old_playback_and_retains_speed_and_cached_synthesis(self):
+        control=tts.Control();player=tts.Player(np)
+        tts.apply_command(control,self.job(),player)
+        audio=np.ones(480,dtype=np.float32)
+        control.cache.put(10,4,'Hello.',audio,[])
+        player.load(audio,1.0)
+        control.results.put(tts.Generated(1,0,audio,[]))
+        job=self.job(ident=2,paused=True);job['speed']=1.7
+        self.assertEqual(tts.apply_command(control,job,player),'speak')
+        self.assertTrue(control.paused);self.assertEqual(control.speed,1.7)
+        self.assertEqual(len(player.audio),0);self.assertTrue(control.results.empty())
+        self.assertIsNotNone(control.cache.get(10,4,'Hello.'))
+        self.assertTrue(control.jobs.get_nowait()['paused'])
+        out=np.ones((480,1),dtype=np.float32)
+        player.callback(out,480,types.SimpleNamespace(outputBufferDacTime=1.0),None)
+        self.assertEqual(out.sum(),0)
+        self.assertEqual(player.position,0)
+
+    def test_cached_revisit_retags_new_playback_id_and_uses_absolute_phrase_offset(self):
+        control=tts.Control();calls=[]
+        def pipeline(text,**kwargs):
+            calls.append(text)
+            yield types.SimpleNamespace(audio=np.ones(480,dtype=np.float32),graphemes=text,tokens=[])
+        def run(job):
+            tts.apply_command(control,job)
+            tts.generate_job(control,control.jobs.get_nowait(),pipeline,'af_heart',np)
+            result=control.results.get_nowait()
+            self.assertTrue(control.results.get_nowait().done)
+            return result
+        first=run(self.job())
+        second=run(self.job(ident=2,paused=True))
+        self.assertEqual(calls,['Hello.'])
+        self.assertIs(first.audio,second.audio)
+        self.assertEqual((second.ident,second.index),(2,0))
+        run(self.job(ident=3,offset=5))
+        self.assertEqual(len(calls),2,'different absolute phrase indices do not alias')
+        run(self.job(ident=4,document=11))
+        self.assertEqual(len(calls),3,'new document invalidates old cache')
+
+    def test_canceled_multi_result_phrase_is_not_cached_as_partial_audio(self):
+        control=tts.Control();tts.apply_command(control,self.job())
+        job=control.jobs.get_nowait()
+        def pipeline(text,**kwargs):
+            yield types.SimpleNamespace(audio=np.ones(480,dtype=np.float32),graphemes='Hello',tokens=[])
+            control.ident=2  # force cancellation between pipeline results
+            yield types.SimpleNamespace(audio=np.ones(480,dtype=np.float32),graphemes='.',tokens=[])
+        tts.generate_job(control,job,pipeline,'af_heart',np)
+        self.assertIsNone(control.cache.get(10,4,'Hello.'))
+        self.assertTrue(control.results.empty())
+
+    def test_rapid_seeks_coalesce_and_old_stop_cannot_clear_new_session(self):
+        control=tts.Control()
+        for i in range(1,101): tts.apply_command(control,self.job(ident=i))
+        self.assertEqual(control.jobs.qsize(),1)
+        self.assertEqual(control.jobs.get_nowait()['id'],100)
+        audio=np.ones(4,dtype=np.float32)
+        control.cache.put(10,4,'Hello.',audio,[])
+        self.assertIsNone(tts.apply_command(control,dict(cmd='stop',id=99)))
+        self.assertEqual(control.ident,100)
+        self.assertIsNotNone(control.cache.get(10,4,'Hello.'))
+        control.ident=0  # completion/error does not prevent explicit cache release
+        self.assertEqual(tts.apply_command(control,dict(cmd='stop',id=100)),'stop')
+        self.assertEqual(control.cache.bytes,0)
+
+    def test_legacy_speak_defaults_and_oversized_requests_are_rejected_before_scheduling(self):
+        control=tts.Control()
+        legacy=dict(cmd='speak',id=1,chunks=[dict(text='Hello.')],speed=1.0)
+        self.assertEqual(tts.apply_command(control,legacy),'speak')
+        job=control.jobs.get_nowait()
+        self.assertEqual((job['document'],job['offset']),(1,0));self.assertFalse(control.paused)
+        oversized=self.job(ident=2)
+        oversized['chunks']=[dict(text='a'*1024)]*300
+        out=io.StringIO()
+        with patch.object(tts,'PROTOCOL_OUT',out):
+            self.assertIsNone(tts.apply_command(control,oversized))
+        self.assertEqual(json.loads(out.getvalue())['event'],'error')
+        self.assertEqual(control.ident,1)
+        self.assertTrue(control.jobs.empty())
+
+    def test_audible_elapsed_excludes_pauses_and_survives_pitch_preserving_speed_changes(self):
+        player=tts.Player(np)
+        player.load(np.ones(48000,dtype=np.float32),1.5)
+        out=np.zeros((24000,1),dtype=np.float32)
+        player.callback(out,24000,types.SimpleNamespace(outputBufferDacTime=10.0),None)
+        self.assertAlmostEqual(player.time_in_phrase(10.5),0.75)
+        self.assertAlmostEqual(player.elapsed_in_phrase(10.5),0.5)
+        source,elapsed=player.next_source_time(),player.next_elapsed_time()
+        self.assertEqual((source,elapsed),(1.5,1.0))
+        player.load(np.ones(960,dtype=np.float32),0.5,source,elapsed)
+        out=np.zeros((480,1),dtype=np.float32)
+        player.callback(out,480,types.SimpleNamespace(outputBufferDacTime=20.0),None)
+        self.assertAlmostEqual(player.time_in_phrase(20.01),1.505)
+        self.assertAlmostEqual(player.elapsed_in_phrase(20.01),1.01)
+        player.paused=True
+        player.callback(out,480,types.SimpleNamespace(outputBufferDacTime=100.0),None)
+        self.assertEqual(out.sum(),0)
+        self.assertAlmostEqual(player.elapsed_in_phrase(100.0),1.02)
+        self.assertEqual(player.position,480)
+
+
+if __name__=='__main__':
+    unittest.main()

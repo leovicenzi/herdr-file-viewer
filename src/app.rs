@@ -218,6 +218,28 @@ pub fn run(open_flag: Option<String>) -> io::Result<()> {
             .with_overrides(to_argv(eff.open.clone()), to_argv(eff.reveal.clone())),
     ));
 
+    // Local TTS is optional and lazy: no Python/model/audio work until the user presses t.
+    // Resolve bundled paths against the executable's plugin checkout, never the viewed cwd.
+    let plugin_root = std::env::var_os("HERDR_PLUGIN_ROOT")
+        .map(PathBuf::from)
+        .or_else(|| {
+            std::env::current_exe()
+                .ok()
+                .and_then(|exe| exe.parent()?.parent()?.parent().map(Path::to_path_buf))
+        });
+    let tts_argv = eff.tts_command.clone().unwrap_or_else(|| {
+        plugin_root
+            .as_deref()
+            .map(crate::speech::CommandSpeech::bundled)
+            .unwrap_or_default()
+    });
+    if std::env::var_os("HERDR_FILE_VIEWER_NO_TTS").is_none() {
+        controller.set_speech_backend(
+            Box::new(crate::speech::CommandSpeech::new(tts_argv)),
+            eff.tts_speed,
+        );
+    }
+
     let mut terminal = ratatui::try_init()?;
     // Mouse is additive to the keyboard-first design (AC-18): herdr forwards mouse events to a
     // pane that requests capture, while reserving Shift+mouse for the terminal's own

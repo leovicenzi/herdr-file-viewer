@@ -17,7 +17,7 @@ is additive and on by default.
 | `x` | **Close all**: close every open folder in the tree, at every depth, and move the cursor to the top-level folder that held the selection. Inert unless the **tree** is focused, so it never replaces a file you are reading (content pane, zoom or pinned preview), and inert in changed-only (`c`) and status (`d`) views, whose folders are always open |
 | `H` (Shift+`h`) | Scroll the **tree** pane left (long / deeply-nested rows), inert unless the tree is focused |
 | `L` (Shift+`l`) | Focus-gated: with the **tree** focused, scroll it right (long / deeply-nested rows); with the **content pane** focused (or zoomed), enter **line-select mode** to select lines and copy either a `file:line` reference or the content itself (see [below](#copy-a-line-reference-or-line-content-l)) |
-| _line-select mode_ | `j`/`k` (or `↑`/`↓`) move the marker, `Shift`+move (`J`/`K`, Shift+`↑`/`↓`) extends a line selection; **click-drag** with the mouse selects **text** (character-granular); `a` adds an annotation for the selected line/range, `Enter` copies the `path:line` / `path:start-end` **reference**, `y`/`Y` copies the selected **content**, `Esc` exits |
+| _line-select mode_ | `j`/`k` (or `↑`/`↓`) move the marker, `Shift`+move (`J`/`K`, Shift+`↑`/`↓`) extends a line selection; **click-drag** with the mouse selects **text** (character-granular); `a` adds an annotation for the selected line/range, `g` reads from its containing phrase, `Enter` copies the `path:line` / `path:start-end` **reference**, `y`/`Y` copies the selected **content**, `Esc` exits |
 | `Enter` | Activate the selection: expand/collapse a directory, or open a file in **zoom mode** (content full-screen) |
 | `i` | Toggle gitignored files |
 | `.` | Toggle hidden (dot-prefixed) files and folders |
@@ -27,6 +27,16 @@ is additive and on by default.
 | `D` (Shift+`d`) | In Diff/FullDiff views, cycle diff presentation through `delta` unified, side-by-side, and plain, unstyled `git diff` text |
 | `v` | Cycle the content view mode |
 | `e` | Open the selected file in `$EDITOR` (see [Opening in an editor](#opening-in-an-editor)) |
+| `t` | **Read aloud** from the phrase at the top visible line of the active preview; press again to pause/resume. Local Kokoro (MLX on Apple Silicon, PyTorch/CUDA on Linux) with word highlighting; see [setup](read-aloud.md) |
+| `T` (Shift+`t`) | Stop read-aloud and clear its highlight |
+| `+` | Increase read-aloud speed by 0.1× (up to 2.5×), preserving pitch |
+| `-` | Decrease read-aloud speed by 0.1× (down to 0.5×), preserving pitch |
+| `(` | Previous speech phrase; after two audible seconds, restart the current phrase instead |
+| `)` | Next speech phrase; pause state and speed are preserved |
+| `K` (Shift+`k`) | Previous speech paragraph/block (no wrap); in line-select mode it still extends the selection upward |
+| `J` (Shift+`j`) | Next speech paragraph/block (no wrap); in line-select mode it still extends the selection downward |
+| `g` | Read from the phrase containing the selected passage, visible current search match, or top visible line (in that order); also a fixed local confirm in line-select mode. Continues beyond the selection, preserving pause/speed |
+| `F` (Shift+`f`) | Toggle **follow playback** (on by default). Off lets you browse/search/select independently; turning on brings the spoken phrase into view |
 | `O` (Shift+`o`) | **Open with default app**: hand the selected file or directory to the OS default application (e.g. an image opens in the system viewer). Read-only hand-off; non-blocking (the viewer keeps running) |
 | `R` (Shift+`r`) | **Reveal in file manager**: open the OS file manager (Finder / Explorer / a Linux file manager) with the selected entry highlighted where supported, so you can drag it out (e.g. into Slack). Read-only hand-off |
 | `f` | **Go to file**: open a fuzzy finder over every file in the tree; type to filter, `↑` / `↓` move, `Enter` opens the selected file and focuses its active preview, `Esc` cancels (`←` / `→` scroll long paths) |
@@ -73,7 +83,7 @@ place when it was edited, its git status changed, or (for a diff) HEAD moved.
 
 Character keys with a control modifier are normally inert, so terminal chords such as `Ctrl+C` do
 not trigger a viewer action; `Shift` is permitted for keys such as `<`, `>`, `{`, and `}` (and `a`/`A`,
-`y`/`Y`, `D`, `W`, `N`, `O`, `R`, `Z`, `?`, `H`/`L`, `J`/`K` in line-select mode, and `d`/`D` in the
+`y`/`Y`, `t`/`T`, `+`, `(`/`)`, `F`, `D`, `W`, `N`, `O`, `R`, `Z`, `?`, `H`/`L`, `J`/`K` for speech or line-select mode, and `d`/`D` in the
 annotation overview).
 
 **On Windows only**, `Ctrl+Alt`+character (with optional `Shift`) is treated as typing (AltGr), not

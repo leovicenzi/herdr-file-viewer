@@ -180,6 +180,10 @@ pub fn viewer_command(dir: &Path) -> Command {
     // Tests must never reach the network: disable the once-a-day update check in every spawned
     // viewer (it would otherwise run `git ls-remote` against the real repo).
     cmd.env("HERDR_FILE_VIEWER_NO_UPDATE_CHECK", "1");
+    // Existing PTY journeys exercise browsing, not the optional audio integration.
+    // Keep their geometry/anchors independent of a developer's installed TTS runtime;
+    // speech-specific journeys explicitly remove this opt-out and inject a stub helper.
+    cmd.env("HERDR_FILE_VIEWER_NO_TTS", "1");
     cmd
 }
 
