@@ -14,6 +14,7 @@ All notable changes to this project are documented here. The format is based on
 - Local read-aloud with Kokoro/MLX: `t` reads or pauses, `T` stops, and `+`/`-` adjust pitch-preserving speed. Model-timed word highlighting, active-phrase shading, and viewport following work against the displayed text. Optional, offline after explicit setup; speech is cancelled on file/view changes. → [read-aloud](docs/read-aloud.md)
 
 ### Fixed
+- Installing this fork no longer downloads upstream's same-version prebuilt binary, which lacks read-aloud. The installer looks for releases in the fork, finds none, and builds from source. → [read-aloud](docs/read-aloud.md)
 - Read-aloud word highlighting no longer stalls until the end of each phrase on audio stacks that queue more than one buffer ahead of the DAC (ALSA/PipeWire). `scripts/setup-tts.sh` no longer aborts on a broken line continuation.
 - A repository can no longer run a program through a submodule `diff.external` (or, on older git, a submodule textconv) while a diff is shown. Nested submodule diffs stay a one-line gitlink summary. → [security](SECURITY.md)
 - The `?` Keybindings list and the remappable-actions table now describe `L` as tree-scroll or line-select, and `Tab` as cycling tree, active preview, and pinned preview. → [keys](docs/keys.md) · [configuration](docs/configuration.md#keybindings)

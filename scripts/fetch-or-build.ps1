@@ -23,7 +23,9 @@
 
 $ErrorActionPreference = 'Stop'
 
-$Repo = 'smarzban/herdr-file-viewer'
+# This fork publishes no releases, so the download misses and the source (with read-aloud) is
+# built. Upstream's same-version prebuilt would silently install a binary without it.
+$Repo = 'leovicenzi/herdr-file-viewer'
 
 $RepoRoot = if ($env:FV_REPO_ROOT) { $env:FV_REPO_ROOT } else { Join-Path $PSScriptRoot '..' }
 $CargoToml = if ($env:FV_CARGO_TOML) { $env:FV_CARGO_TOML } else { Join-Path $RepoRoot 'Cargo.toml' }
