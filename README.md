@@ -14,6 +14,10 @@
 > upstream. This fork publishes no prebuilt binaries, so installing it builds from source and needs
 > Rust 1.96+.
 
+https://github.com/user-attachments/assets/1207f8ba-23ca-4ea9-8978-16e777288e86
+
+
+
 **A git-aware, read-only file viewer in a herdr pane.** Tree on the left. On the right, the view
 that file deserves: a **diff** if it changed, **rendered markdown**, or **highlighted code**.
 Agents can drop you on a file or a line. You pin one file, mark a range, and paste those notes
