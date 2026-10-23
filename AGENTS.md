@@ -95,6 +95,8 @@ These shape every decision; violating one is a design error, not a style nit:
 - **`ignore` 0.4.26** for fast, `.gitignore`-aware tree walking (do not hand-roll gitignore).
 - **git via the system CLI** (read-only subcommands only), no `git2`/`gix`.
 - **`serde`/`serde_json`** parse `HERDR_PLUGIN_CONTEXT_JSON` and the advisory cache.
+- **`whatlang` 0.18** picks each read-aloud block's language (en/pt/es/fr/it allowlist); trigram
+  models are not something to hand-roll, and short-text accuracy matters for the voice choice.
 - **System `curl`** is optional at runtime: it retrieves fixed official HTTPS documents for
   advisory notices; without it, document retrieval is unavailable without an error.
 - Tests: `cargo test` + ratatui `TestBackend` + **`insta`** (snapshots) + **`expectrl`** (pty e2e).

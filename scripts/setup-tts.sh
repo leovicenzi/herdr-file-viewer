@@ -31,10 +31,13 @@ esac
 import sys
 sys.path.insert(0, sys.argv[1])
 import read_aloud
-pipeline = read_aloud.load_pipeline()
-# Warm the default voice without playing sound. Caches weights, voice, language data.
-for result in pipeline('Local reading is ready.', voice='af_heart'):
-    assert result.audio is not None and len(result.audio) > 0
-backend = 'MLX' if read_aloud.use_mlx() else f'PyTorch/{getattr(pipeline.model, "device", "?")}'
-print(f'Kokoro ({backend}) ready. Playback is offline; press t in the viewer.')
+voices = read_aloud.Voices()
+# Warm every language's voice without playing sound. Caches weights, voices, language data.
+for lang, text in [('en', 'Local reading is ready.'), ('pt', 'A leitura local está pronta.'),
+                   ('es', 'La lectura local está lista.'), ('fr', 'La lecture locale est prête.'),
+                   ('it', 'La lettura locale è pronta.')]:
+    for result in voices.pipeline(lang)(text, voice=read_aloud.voice_for(lang)):
+        assert result.audio is not None and len(result.audio) > 0
+backend = 'MLX' if read_aloud.use_mlx() else f'PyTorch/{getattr(voices.model, "device", "?")}'
+print(f'Kokoro ({backend}) ready in English, Portuguese, Spanish, French and Italian. Playback is offline; press t in the viewer.')
 PY

@@ -9,12 +9,39 @@ import numpy as np
 import read_aloud as tts
 
 
+def single(pipeline):
+    """A Voices stand-in that serves one fake pipeline for every language."""
+    return types.SimpleNamespace(pipeline=lambda lang: pipeline)
+
+
 class ReadAloudTests(unittest.TestCase):
     def test_utf8_word_mapping_and_repeated_words(self):
         tokens = [types.SimpleNamespace(text=text, start_ts=i, end_ts=i+0.5)
                   for i, text in enumerate(["Olá", "go", "go", "normalized-missing"])]
         self.assertEqual(tts.word_marks("Olá go go", tokens),
                          [(0,0.5,0,4),(1,1.5,5,7),(2,2.5,8,10)])
+
+    def test_duration_marks_time_words_including_expanded_numbers(self):
+        vocab={c:1 for c in 'abcdefghijklmnopqrstuvwxyz '}
+        phonemes='ola em mil nove'   # "Olá em 1990" with the number spoken as two words
+        durations=[5]+[2]*len(phonemes)+[0]
+        g2p=lambda word:({'Olá':'ola','em':'em','1990':'mil nove'}[word],None)
+        marks=tts.duration_marks('Olá em 1990',phonemes,durations,vocab,g2p)
+        # Words keep UTF-8 offsets; 1990 spans both of its spoken words.
+        self.assertEqual([m[2:] for m in marks],[(0,4),(5,7),(8,12)])
+        self.assertAlmostEqual(marks[0][0],2/40)          # leading-silence convention
+        self.assertAlmostEqual(marks[0][1],(2+6)/40)
+        self.assertAlmostEqual(marks[2][1],(2+2*len(phonemes))/40)
+        self.assertTrue(all(a<b for a,b,_,_ in marks))
+
+    def test_duration_marks_refuse_to_guess_on_any_mismatch(self):
+        vocab={c:1 for c in 'abcdefghijklmnopqrstuvwxyz '}
+        g2p=lambda word:(word.lower(),None)
+        good=[5]+[2]*len('ola em')+[0]
+        self.assertNotEqual(tts.duration_marks('ola em',  'ola em',good,vocab,g2p),[])
+        self.assertEqual(tts.duration_marks('ola em',  'ola em',good[:-1],vocab,g2p),[],'durations out of step')
+        self.assertEqual(tts.duration_marks('ola em x','ola em',good,vocab,g2p),[],'word counts disagree')
+        self.assertEqual(tts.duration_marks('ola em',  'ola em',None,vocab,g2p),[],'backend gave no durations')
 
     def test_missing_timestamps_do_not_invent_alignment(self):
         token = types.SimpleNamespace(text="hello", start_ts=None, end_ts=None)
@@ -178,7 +205,7 @@ class NavigationTests(unittest.TestCase):
             yield types.SimpleNamespace(audio=np.ones(480,dtype=np.float32),graphemes=text,tokens=[])
         def run(job):
             tts.apply_command(control,job)
-            tts.generate_job(control,control.jobs.get_nowait(),pipeline,'af_heart',np)
+            tts.generate_job(control,control.jobs.get_nowait(),single(pipeline),np)
             result=control.results.get_nowait()
             self.assertTrue(control.results.get_nowait().done)
             return result
@@ -199,9 +226,30 @@ class NavigationTests(unittest.TestCase):
             yield types.SimpleNamespace(audio=np.ones(480,dtype=np.float32),graphemes='Hello',tokens=[])
             control.ident=2  # force cancellation between pipeline results
             yield types.SimpleNamespace(audio=np.ones(480,dtype=np.float32),graphemes='.',tokens=[])
-        tts.generate_job(control,job,pipeline,'af_heart',np)
-        self.assertIsNone(control.cache.get(10,4,'Hello.'))
+        tts.generate_job(control,job,single(pipeline),np)
+        self.assertIsNone(control.cache.get(10,4,('en','Hello.')))
         self.assertTrue(control.results.empty())
+
+    def test_language_picks_voice_and_keys_the_cache(self):
+        control=tts.Control();calls=[]
+        def pipeline(text,voice,**kwargs):
+            calls.append(voice)
+            yield types.SimpleNamespace(audio=np.ones(480,dtype=np.float32),graphemes=text,tokens=[])
+        job=self.job();job['chunks']=[{'text':'Hello.','lang':l} for l in ('pt','es','fr','it')]+[{'text':'Hello.'}]
+        tts.apply_command(control,job)
+        control.results=tts.queue.Queue()  # nothing drains here; the real queue holds two
+        with patch.dict(tts.os.environ,{},clear=True):
+            tts.generate_job(control,control.jobs.get_nowait(),single(pipeline),np)
+        self.assertEqual(calls,['pf_dora','ef_dora','ff_siwis','if_sara','af_heart'])
+        self.assertIsNotNone(control.cache.get(10,4,('pt','Hello.')))
+        self.assertIsNone(control.cache.get(10,4,('en','Hello.')),'other language, other audio')
+
+    def test_unknown_language_is_rejected_before_scheduling(self):
+        control=tts.Control();job=self.job();job['chunks']=[{'text':'Hallo.','lang':'de'}]
+        with patch.object(tts,'emit') as emit:
+            self.assertIsNone(tts.apply_command(control,job))
+        emit.assert_called_once()
+        self.assertTrue(control.jobs.empty())
 
     def test_rapid_seeks_coalesce_and_old_stop_cannot_clear_new_session(self):
         control=tts.Control()

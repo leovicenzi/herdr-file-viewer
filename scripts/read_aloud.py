@@ -14,6 +14,7 @@ import math
 import os
 import platform
 import queue
+import re
 import subprocess
 import sys
 import threading
@@ -24,6 +25,9 @@ from collections import OrderedDict, deque
 PROTOCOL_OUT = sys.stdout
 MODEL = "mlx-community/Kokoro-82M-bf16"
 TORCH_MODEL = "hexgrad/Kokoro-82M"
+# Protocol language -> (Kokoro lang_code, voice). en uses Misaki; the others use espeak-ng.
+LANGUAGES = {"en": ("a", "af_heart"), "pt": ("p", "pf_dora"), "es": ("e", "ef_dora"),
+             "fr": ("f", "ff_siwis"), "it": ("i", "if_sara")}
 SAMPLE_RATE = 24000
 MAX_REQUEST = 2 * 1024 * 1024
 MAX_TEXT_BYTES = 256 * 1024
@@ -193,9 +197,25 @@ def torch_device(torch):
     return "cuda" if torch.cuda.is_available() else "cpu"
 
 
-def load_pipeline():
-    lang_code = os.environ.get("HERDR_TTS_LANG", "a")
-    if lang_code in ("a", "b"):
+def voice_for(lang):
+    if lang == "en":
+        return os.environ.get("HERDR_TTS_VOICE", "af_heart")
+    return LANGUAGES[lang][1]
+
+
+def load_model():
+    """One model for every language; the per-language pipelines only add a phonemizer."""
+    if use_mlx():
+        from mlx_audio.tts.utils import load_model as load_mlx
+        return load_mlx(MODEL)
+    import torch
+    from kokoro import KModel
+    return KModel(repo_id=TORCH_MODEL).to(torch_device(torch)).eval()
+
+
+def load_pipeline(lang, model):
+    lang_code = LANGUAGES[lang][0]
+    if lang == "en":
         # Provisioning must remain explicit, never an implicit Misaki download.
         from importlib.metadata import version, PackageNotFoundError
         try:
@@ -203,28 +223,95 @@ def load_pipeline():
         except PackageNotFoundError:
             raise RuntimeError("English language data is missing; run scripts/setup-tts.sh")
     if use_mlx():
-        from mlx_audio.tts.utils import load_model
         from mlx_audio.tts.models.kokoro.pipeline import KokoroPipeline
-        model = load_model(MODEL)
         return KokoroPipeline(lang_code=lang_code, model=model, repo_id=MODEL)
     # Same misaki-based pipeline (graphemes + token timestamps), on PyTorch.
-    import torch
     from kokoro import KPipeline
-    return KPipeline(lang_code=lang_code, repo_id=TORCH_MODEL, device=torch_device(torch))
+    return KPipeline(lang_code=lang_code, repo_id=TORCH_MODEL, model=model)
 
 
-def generate_job(control, job, pipeline, voice, np):
+class Voices:
+    """Lazily built pipelines sharing one warm model; owned by the synthesis thread."""
+    def __init__(self):
+        self.model = None
+        self.pipelines = {}
+
+    def pipeline(self, lang):
+        if self.model is None:
+            self.model = load_model()
+        if lang not in self.pipelines:
+            self.pipelines[lang] = load_pipeline(lang, self.model)
+        return self.pipelines[lang]
+
+
+def duration_marks(text, phonemes, durations, vocab, g2p):
+    """Word timing for espeak languages, which Kokoro returns without token timestamps.
+
+    Kokoro predicts one duration (in 1/40 s frames) per phoneme it kept, plus <bos>/<eos>.
+    Phoneme words are space-separated; each text word is phonemized alone to learn how many
+    phoneme words it became ("1990" becomes several). Any disagreement keeps only the phrase
+    highlight, never a guessed word.
+    """
+    if durations is None or not phonemes or not vocab:
+        return []
+    durations = [int(d) for d in durations]
+    kept = [p for p in phonemes if p in vocab]
+    if len(durations) != len(kept) + 2:
+        return []
+    groups, current = [], None
+    # Same leading-silence convention as Kokoro's English timestamps.
+    frame = max(0, durations[0] - 3)
+    for p, d in zip(kept, durations[1:]):
+        if p.isspace():
+            if current:
+                groups.append(current)
+            current = None
+        else:
+            if current is None:
+                current = [frame, frame]
+            current[1] = frame + d
+        frame += d
+    if current:
+        groups.append(current)
+    words = [(m.start(), m.end()) for m in re.finditer(r"\S+", text)]
+    counts = [len((g2p(text[s:e])[0] or "").split()) for s, e in words]
+    if sum(counts) != len(groups):
+        return []
+    marks, group = [], 0
+    for (s, e), n in zip(words, counts):
+        if n:
+            marks.append((groups[group][0] / 40, groups[group + n - 1][1] / 40,
+                          len(text[:s].encode()), len(text[:e].encode())))
+        group += n
+    return marks
+
+
+def result_marks(text, result, pipeline):
+    if result.tokens:
+        return word_marks(text, result.tokens)
+    output = getattr(result, "output", None)
+    durations = getattr(output, "pred_dur", None)
+    vocab = getattr(getattr(pipeline, "model", None), "vocab", None)
+    g2p = getattr(pipeline, "g2p", None)
+    if g2p is None:
+        return []
+    return duration_marks(text, result.phonemes, durations, vocab, g2p)
+
+
+def generate_job(control, job, voices, np):
     ident, document, offset = job["id"], job["document"], job["offset"]
     for index, chunk in enumerate(job["chunks"]):
         if ident != control.ident or control.closed.is_set():
             break
-        text = chunk["text"]
-        cached = control.cache.get(document, offset + index, text)
+        text, lang = chunk["text"], chunk.get("lang", "en")
+        key = (lang, text)  # the same text in another language is different audio
+        cached = control.cache.get(document, offset + index, key)
         if cached is not None:
             audio, marks = cached
         else:
             audios, marks, seconds, cursor = [], [], 0.0, 0
-            for result in pipeline(text, voice=voice, speed=1.0):
+            pipeline = voices.pipeline(lang)
+            for result in pipeline(text, voice=voice_for(lang), speed=1.0):
                 if ident != control.ident or control.closed.is_set():
                     break
                 audio = result.audio
@@ -236,7 +323,7 @@ def generate_job(control, job, pipeline, voice, np):
                 if at >= 0:
                     byte_offset = len(text[:at].encode())
                     marks.extend((a+seconds, b+seconds, s+byte_offset, e+byte_offset)
-                                 for a,b,s,e in word_marks(segment, result.tokens))
+                                 for a,b,s,e in result_marks(segment, result, pipeline))
                     cursor = at + len(segment)
                 audios.append(audio)
                 seconds += len(audio) / SAMPLE_RATE
@@ -246,14 +333,14 @@ def generate_job(control, job, pipeline, voice, np):
             if not audios:
                 continue
             audio = np.concatenate(audios)
-            control.cache.put(document, offset + index, text, audio, marks)
+            control.cache.put(document, offset + index, key, audio, marks)
         control.publish(Generated(ident, index, audio, marks))
     if ident == control.ident:
         control.publish(Generated(ident, -1, done=True))
 
 
 def synthesize(control):
-    pipeline = None
+    voices = Voices()
     while not control.closed.is_set():
         try:
             job = control.jobs.get(timeout=0.1)
@@ -264,10 +351,8 @@ def synthesize(control):
             continue
         try:
             with contextlib.redirect_stdout(sys.stderr):
-                if pipeline is None:
-                    pipeline = load_pipeline()
                 import numpy as np
-                generate_job(control, job, pipeline, os.environ.get("HERDR_TTS_VOICE", "af_heart"), np)
+                generate_job(control, job, voices, np)
         except Exception as exc:
             control.publish(Generated(ident, -1, error=f"{type(exc).__name__}: {exc}"))
 
@@ -372,7 +457,8 @@ def apply_command(control, command, player=None):
                  and type(offset) is int and offset >= 0 and type(paused) is bool)
         if valid:
             valid = all(isinstance(c, dict) and isinstance(c.get("text"), str)
-                        and 0 < len(c["text"]) <= 1024 for c in chunks)
+                        and 0 < len(c["text"]) <= 1024
+                        and c.get("lang", "en") in LANGUAGES for c in chunks)
         if valid:
             valid = sum(len(c["text"].encode()) for c in chunks) <= MAX_TEXT_BYTES
         try:

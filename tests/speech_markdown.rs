@@ -153,6 +153,76 @@ fn joined_unicode_words_map_back_to_their_own_display_line_without_gutter_or_joi
     );
 }
 
+fn langs(chunks: &[SpeechChunk]) -> Vec<(&str, SpeechLang)> {
+    chunks.iter().map(|c| (c.text.as_str(), c.lang)).collect()
+}
+
+#[test]
+fn mixed_language_documents_switch_voice_per_block() {
+    let input = lines(concat!(
+        "# Installation\n\n",
+        "To install the plugin, run the command below and restart herdr.\n\n",
+        "# Instalação\n\n",
+        "Para instalar o plugin, rode o comando abaixo e reinicie o herdr.\n\n",
+        "- Pressione t\n\n",
+        "```\nherdr plugin install\n```\n\n",
+        "Ok.\n\n",
+        "## Uso\n\n",
+        "Para usar el plugin, ejecuta el comando de abajo y reinicia herdr.\n\n",
+        "Pour installer le plugin, lancez la commande ci-dessous et redémarrez herdr.\n\n",
+        "Per installare il plugin, esegui il comando qui sotto e riavvia herdr.",
+    ));
+    let result = markdown_chunks(&input, 0, &[]);
+    assert_eq!(
+        langs(&result),
+        [
+            // A short heading takes the language of the section it introduces.
+            ("# Installation", SpeechLang::En),
+            (
+                "To install the plugin, run the command below and restart herdr.",
+                SpeechLang::En
+            ),
+            ("# Instalação", SpeechLang::Pt),
+            (
+                "Para instalar o plugin, rode o comando abaixo e reinicie o herdr.",
+                SpeechLang::Pt
+            ),
+            // Short, unmarked prose continues the language before it ...
+            ("- Pressione t", SpeechLang::Pt),
+            // ... code is read in English without dragging the prose after it along ...
+            ("herdr plugin install", SpeechLang::En),
+            ("Ok.", SpeechLang::Pt),
+            // ... and an ambiguous heading looks ahead to its section.
+            ("## Uso", SpeechLang::Es),
+            (
+                "Para usar el plugin, ejecuta el comando de abajo y reinicia herdr.",
+                SpeechLang::Es
+            ),
+            (
+                "Pour installer le plugin, lancez la commande ci-dessous et redémarrez herdr.",
+                SpeechLang::Fr
+            ),
+            (
+                "Per installare il plugin, esegui il comando qui sotto e riavvia herdr.",
+                SpeechLang::It
+            ),
+        ]
+    );
+    assert_eq!(
+        serde_json::to_value(&result[2]).unwrap().get("lang"),
+        Some(&serde_json::json!("pt")),
+        "every phrase tells the backend which voice to use"
+    );
+}
+
+#[test]
+fn a_whole_block_shares_one_language_across_its_phrases() {
+    let input = lines("O visualizador lê documentos em voz alta. Tudo acontece localmente. Ok.");
+    let result = markdown_chunks(&input, 0, &[]);
+    assert_eq!(result.len(), 3);
+    assert!(result.iter().all(|c| c.lang == SpeechLang::Pt));
+}
+
 #[derive(Default, Clone)]
 struct Fake {
     commands: Arc<Mutex<Vec<SpeechCommand>>>,

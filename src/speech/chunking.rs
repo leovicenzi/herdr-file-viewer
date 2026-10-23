@@ -7,6 +7,8 @@ use ratatui::{
 };
 use serde::Serialize;
 
+use super::language::{self, BlockKind, SpeechLang};
+
 const MAX_CHARS: usize = 240;
 pub const MAX_BYTES: usize = 256 * 1024;
 pub const MAX_CHUNKS: usize = 2048;
@@ -66,6 +68,11 @@ pub struct SpeechChunk {
     /// Display-derived paragraph/block anchor, local to this settled preview.
     #[serde(skip)]
     pub block: usize,
+    /// Local-only: what the block is, for language inheritance.
+    #[serde(skip)]
+    pub kind: BlockKind,
+    /// Spoken language, detected per block; shared by every phrase of the block.
+    pub lang: SpeechLang,
 }
 
 /// First phrase containing a display caret, or the next readable phrase after it.
@@ -138,6 +145,7 @@ struct Block {
     text: String,
     parts: Vec<SpeechPart>,
     anchor: usize,
+    kind: BlockKind,
 }
 
 impl Block {
@@ -236,6 +244,8 @@ impl Block {
                         end: first.range.end,
                         parts,
                         block,
+                        kind: self.kind,
+                        lang: SpeechLang::default(),
                     });
                     *bytes += text.len();
                 }
@@ -359,12 +369,11 @@ fn build(
                 }
             }
         }
-        let isolated = !markdown
-            || in_code
-            || table
-            || heading(trimmed, styled)
+        let code = in_code
             || syntax_colors.len() >= 2
             || body.chars().take_while(|c| *c == ' ').count() >= 4;
+        let is_heading = markdown && !code && heading(trimmed, styled);
+        let isolated = !markdown || code || table || is_heading;
         if isolated || list_start(trimmed) || quote != previous_quote {
             block.flush(&mut result, &mut bytes, max_bytes, max_chunks);
             buffered = 0;
@@ -380,6 +389,13 @@ fn build(
             break;
         }
         if block.text.is_empty() {
+            block.kind = if markdown && code {
+                BlockKind::Code
+            } else if is_heading {
+                BlockKind::Heading
+            } else {
+                BlockKind::Prose
+            };
             block.anchor = if markdown {
                 line
             } else {
@@ -401,5 +417,6 @@ fn build(
         }
     }
     block.flush(&mut result, &mut bytes, max_bytes, max_chunks);
+    language::assign(&mut result);
     result
 }

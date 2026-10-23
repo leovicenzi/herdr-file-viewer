@@ -8,6 +8,7 @@ All notable changes to this project are documented here. The format is based on
 ## [Unreleased]
 
 ### Added
+- Read-aloud in Brazilian Portuguese (`pf_dora`), Spanish (`ef_dora`), French (`ff_siwis`), and Italian (`if_sara`) as well as English. The language is detected per block, so mixed-language documents switch voice per section. The status strip shows the current language, and every language keeps word highlighting. → [read-aloud](docs/read-aloud.md#languages)
 - Read-aloud on Linux x86_64: the bundled helper runs Kokoro on PyTorch (CUDA by default, CPU fallback, `HERDR_TTS_DEVICE` override) where macOS arm64 keeps MLX. `scripts/setup-tts.sh` provisions either. → [read-aloud](docs/read-aloud.md)
 - Read-aloud navigation: `(`/`)` skip phrases, `K`/`J` skip paragraphs/blocks, `g` reads from a selected passage or visible search match, and `F` toggles following playback. Seeks preserve pause/speed and can move before the original start. A bounded, document-scoped in-memory audio cache accelerates revisits. → [read-aloud](docs/read-aloud.md)
 - Markdown read-aloud joins visual soft line breaks before synthesis, retaining multi-line word/phrase highlights instead of pausing at each displayed line. Source hard breaks stay distinct from renderer padding. Oversized sentences prefer their last comma within the 240-character limit before falling back to a word boundary.

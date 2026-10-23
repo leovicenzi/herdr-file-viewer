@@ -38,6 +38,8 @@ fn phrase() -> SpeechChunk {
         end: 15,
         parts: Vec::new(),
         block: 2,
+        kind: BlockKind::Prose,
+        lang: SpeechLang::Pt,
     }
 }
 fn session(fake: &Fake) -> u64 {

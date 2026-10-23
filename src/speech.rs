@@ -10,12 +10,14 @@ use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex, mpsc};
 
 mod chunking;
+mod language;
 #[cfg(test)]
 mod mailbox_tests;
 pub use chunking::{
     SpeechChunk, SpeechPart, TextMode, TextRange, chunk_at, chunks, index as index_chunks,
     markdown_chunks, markdown_source_chunks,
 };
+pub use language::{BlockKind, SpeechLang};
 
 pub const MIN_SPEED: f64 = 0.5;
 pub const MAX_SPEED: f64 = 2.5;
@@ -340,7 +342,11 @@ impl ReadAloud {
             }
         };
         Some(format!(
-            "{state} · {:.1}× · {}/{} · F follow {} · t {} · () phrase · K/J block · g here",
+            "{state} · {} · {:.1}× · {}/{} · F follow {} · t {} · () phrase · K/J block · g here",
+            self.chunks
+                .get(self.current)
+                .map_or(SpeechLang::En, |c| c.lang)
+                .label(),
             self.speed,
             self.current + 1,
             self.chunks.len(),

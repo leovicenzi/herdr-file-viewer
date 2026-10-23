@@ -1,8 +1,9 @@
 # Local read-aloud
 
 This optional feature reads the **displayed text**, locally, using the Apache-2.0
-[Kokoro 82M](https://huggingface.co/hexgrad/Kokoro-82M) model, American English
-voice `af_heart`. Kokoro is much lighter than voice-cloning/conversational models.
+[Kokoro 82M](https://huggingface.co/hexgrad/Kokoro-82M) model, in **English, Brazilian
+Portuguese, Spanish, French, and Italian** (see [Languages](#languages)). Kokoro is much lighter than
+voice-cloning/conversational models.
 The bundled helper picks its inference backend by platform:
 
 | Platform | Backend | Model |
@@ -12,6 +13,42 @@ The bundled helper picks its inference backend by platform:
 
 Both use the same Misaki phonemizer and report the same token timestamps, so word
 highlighting behaves identically.
+
+## Languages
+
+The language is detected automatically, **per block** (paragraph, heading, list item,
+table or code row), so a document can mix sections in any of these languages:
+
+| Language | Voice | Phonemizer |
+| --- | --- | --- |
+| English | `af_heart` | Misaki |
+| Brazilian Portuguese | `pf_dora` | espeak-ng |
+| Spanish | `ef_dora` | espeak-ng |
+| French | `ff_siwis` | espeak-ng |
+| Italian | `if_sara` | espeak-ng |
+
+- A block of six or more words is classified by its text
+  ([whatlang](https://github.com/greyblake/whatlang-rs), limited to these five languages).
+- A shorter block switches language only on a letter unique to one of them (`ã õ`
+  Portuguese, `ñ ¿ ¡` Spanish, `œ î ï û ë ÿ` French, `ì ò` Italian; shared letters such
+  as `ç` or `à` decide nothing). Otherwise it inherits: a heading takes the language of
+  the block after it (the section it introduces), anything else the block before it.
+  The document's overall language is the fallback.
+- Code is read in English and does not change the language of the prose around it.
+  In rendered Markdown, code is recognized by indentation or by two or more syntax
+  colors; a short, single-color code block (e.g. a one-line shell command) looks like
+  prose there and takes the language of the text around it.
+- The status strip shows the current phrase's language (`EN`/`PT`/`ES`/`FR`/`IT`). There is no
+  manual override.
+
+A phrase is spoken in a single language: foreign words inside a sentence ("faça o
+commit") take the block language's pronunciation. Detection reads the displayed text
+only; it never sees source metadata such as an HTML `lang` attribute.
+
+Kokoro returns word timestamps only for English. For the other languages the helper
+derives them from the model's per-phoneme durations, phonemizing each word alone so
+spoken-out numbers ("1990") stay attached to their word. When the two disagree, that
+phrase keeps only its phrase shading, never a guessed word.
 
 ## One-time setup
 
@@ -31,8 +68,9 @@ sh scripts/setup-tts.sh
 cargo build --release
 ```
 
-Setup downloads packages, model weights, voices, and English language data, then
-warms the model without playing sound. Python (3.11 on macOS, 3.12 on Linux) is
+Setup downloads packages, model weights, the five voices, and English language data
+(the other languages use the bundled espeak-ng), then warms each language without
+playing sound. Python (3.11 on macOS, 3.12 on Linux) is
 isolated in `.venv-tts` (gitignored); no system Python packages are changed. On Linux,
 setup installs the CUDA 13 PyTorch build (several GB, needs an NVIDIA driver that
 supports CUDA 13). Set `TTS_TORCH_INDEX=cpu` before running setup for a much smaller
@@ -64,7 +102,7 @@ than terminating the viewer. The helper starts only on the first explicit read.
 | `g` | Read from the phrase containing the selection, visible current search match, or viewport top, in that priority order |
 | `F` | Toggle follow playback (Shift+`f`); on by default, with its state shown in the status strip |
 
-The status strip reports idle/loading/reading/paused/finished, speed, phrase position, and follow state. With a
+The status strip reports idle/loading/reading/paused/finished, the phrase's language, speed, phrase position, and follow state. With a
 backend configured its row stays reserved even while idle, so starting speech or
 changing speed cannot resize/reflow the preview and invalidate its coordinates. A shaded
 phrase gives context; the current word is yellow/bold. With follow on, the active
@@ -182,11 +220,9 @@ tts_speed = 1.0
 Set `HERDR_FILE_VIEWER_NO_TTS=1` to disable the optional backend and its idle
 status row (also used by non-audio PTY tests, independently of local runtime setup).
 
-The helper accepts `HERDR_TTS_VOICE` and `HERDR_TTS_LANG` in its environment.
-For example, Kokoro uses `p` for Brazilian Portuguese and voices such as
-`pf_dora`; the language and voice must agree. Only the default English setup is
-provisioned/tested by `setup-tts.sh`; install/pre-cache any additional phonemizer
-language data explicitly before using another language offline.
+The helper accepts `HERDR_TTS_VOICE` in its environment to replace the English voice
+(any American English Kokoro voice, e.g. `am_michael`); pre-cache a new voice by running
+setup with it set. The other languages' voices are fixed.
 
 ## Backend protocol
 
@@ -196,7 +232,7 @@ The controller sends JSON lines (text is **never** in argv or interpolated into 
 shell command):
 
 ```json
-{"cmd":"speak","id":3,"document":1,"offset":0,"paused":false,"chunks":[{"text":"Hello.","line":0,"start":0,"end":6}],"speed":1.0}
+{"cmd":"speak","id":3,"document":1,"offset":0,"paused":false,"chunks":[{"text":"Hello.","line":0,"start":0,"end":6,"lang":"en"}],"speed":1.0}
 {"cmd":"pause","id":3,"paused":true}
 {"cmd":"speed","id":3,"speed":1.5}
 {"cmd":"stop","id":3}
@@ -210,7 +246,9 @@ A backend emits one JSON object per line on stdout (all diagnostics go to stderr
 {"event":"error","id":3,"message":"Output device unavailable"}
 ```
 
-`start`/`end` are optional UTF-8 byte offsets **within the phrase**, not character
+Each chunk's `lang` is `en`, `pt`, `es`, `fr`, or `it`; backends that ignore it read everything in
+one language. The bundled helper rejects any other value and treats a missing `lang`
+as `en`. `start`/`end` are optional UTF-8 byte offsets **within the phrase**, not character
 indices, and identify the current word. Omitting them highlights only the phrase.
 Markdown phrases may span multiple displayed lines; the viewer retains their
 byte-exact source map locally. The command's `line`/`start`/`end` metadata describes
