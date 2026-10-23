@@ -3,7 +3,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use herdr_file_viewer::{
     controller::{Components, ContentProvider, Controller, RenderResult, RootProviders},
     git::Baseline,
-    intent::Intent,
+    intent::{Intent, ReadingAction},
     preview::PreviewSelection,
     speech::*,
     view_policy::ViewMode,
@@ -347,7 +347,7 @@ const SAMPLE: &str =
 fn follow_off_keeps_browsing_viewport_and_follow_on_reveals_paused_playback_position() {
     let (_dir, mut ctrl, fake) = controller(SAMPLE);
     ctrl.handle(Intent::ToggleSpeech);
-    ctrl.handle(Intent::SpeechToggleFollow);
+    ctrl.handle_reading(ReadingAction::ToggleFollow);
     assert!(!ctrl.speech().follow);
     fake.progress(3, 0.0);
     ctrl.poll();
@@ -355,7 +355,7 @@ fn follow_off_keeps_browsing_viewport_and_follow_on_reveals_paused_playback_posi
     assert_eq!(ctrl.content_scroll(), 0);
     ctrl.handle(Intent::ToggleSpeech);
     assert_eq!(ctrl.speech().phase, Phase::Paused);
-    ctrl.handle(Intent::SpeechToggleFollow);
+    ctrl.handle_reading(ReadingAction::ToggleFollow);
     assert!(ctrl.speech().follow);
     assert!(ctrl.content_scroll() > 0);
     assert_eq!(ctrl.speech().phase, Phase::Paused);
@@ -365,13 +365,13 @@ fn follow_off_keeps_browsing_viewport_and_follow_on_reveals_paused_playback_posi
 fn selected_read_preserves_pause_speed_and_targets_character_caret_not_viewport() {
     let (_dir, mut ctrl, fake) = controller(SAMPLE);
     ctrl.handle(Intent::ToggleSpeech);
-    ctrl.handle(Intent::SpeechFaster);
+    ctrl.handle_reading(ReadingAction::Faster);
     ctrl.handle(Intent::ToggleSpeech);
     let (_, doc, _, _, _, _) = speak_fields(&fake);
     let mut selection = PreviewSelection::new(4);
     selection.begin_char(4, "spans lines. ".len(), 6);
     ctrl.active_interaction_mut().selection = Some(selection);
-    ctrl.handle(Intent::SpeechReadHere);
+    ctrl.handle_reading(ReadingAction::ReadHere);
     let (_, new_doc, offset, paused, speed, chunks) = speak_fields(&fake);
     assert_eq!(doc, new_doc);
     assert_eq!(offset, 2);
@@ -398,7 +398,7 @@ fn line_select_g_reads_containing_phrase_and_closes_only_that_modal() {
     assert_eq!(offset, 1);
     assert!(!paused);
     assert_eq!(chunks[0].text, "Middle phrase spans lines.");
-    ctrl.handle(Intent::SpeechPreviousPhrase);
+    ctrl.handle_reading(ReadingAction::PreviousPhrase);
     assert_eq!(ctrl.speech().current_chunk(), Some(0));
 }
 
@@ -414,10 +414,10 @@ fn visible_current_search_match_is_a_read_here_anchor_but_offscreen_matches_are_
             end: 17,
         }],
     });
-    ctrl.handle(Intent::SpeechReadHere);
+    ctrl.handle_reading(ReadingAction::ReadHere);
     assert_eq!(speak_fields(&fake).2, 2);
-    ctrl.handle(Intent::StopSpeech);
+    ctrl.handle_reading(ReadingAction::Stop);
     ctrl.active_interaction_mut().vertical_scroll = 5;
-    ctrl.handle(Intent::SpeechReadHere);
+    ctrl.handle_reading(ReadingAction::ReadHere);
     assert_eq!(speak_fields(&fake).2, 3);
 }

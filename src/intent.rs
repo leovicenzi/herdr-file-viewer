@@ -173,26 +173,9 @@ pub enum Intent {
     /// [`Intent::TreeScrollLeft`]; on content focus it opens line-select. Bound to `L`
     /// (Shift+`l`) only; no event hook (AC-N6). Inert on pinned focus.
     TreeScrollRight,
-    /// Start local read-aloud from the visible active preview, or pause/resume it.
+    /// Start local read-aloud from the visible active preview, entering reading mode (whose
+    /// fixed keys are [`ReadingAction`]s), or pause/resume it.
     ToggleSpeech,
-    /// Stop read-aloud and clear the spoken highlight.
-    StopSpeech,
-    /// Increase local read-aloud playback speed (pitch preserved).
-    SpeechFaster,
-    /// Decrease local read-aloud playback speed (pitch preserved).
-    SpeechSlower,
-    /// Skip to the next bounded speech phrase, without changing pause/speed.
-    SpeechNextPhrase,
-    /// Restart the phrase after two audible seconds, otherwise go to the preceding one.
-    SpeechPreviousPhrase,
-    /// Skip to the next display-derived paragraph/block.
-    SpeechNextParagraph,
-    /// Skip to the start of the preceding display-derived paragraph/block.
-    SpeechPreviousParagraph,
-    /// Read from the phrase containing the selection, visible search match, or viewport top.
-    SpeechReadHere,
-    /// Toggle following the playback cursor independently of browsing.
-    SpeechToggleFollow,
     /// Close the viewer and return control to the prior pane (AC-20).
     Close,
 }
@@ -200,7 +183,7 @@ pub enum Intent {
 impl Intent {
     /// Every intent variant — lets the dispatcher and tests enumerate the closed set so
     /// keyboard-completeness (AC-18) and the no-file/git-mutation invariant (AC-N3) stay checkable.
-    pub const ALL: [Intent; 56] = [
+    pub const ALL: [Intent; 47] = [
         Intent::NavUp,
         Intent::NavDown,
         Intent::PageUp,
@@ -247,16 +230,48 @@ impl Intent {
         Intent::TreeScrollRight,
         Intent::ShowHelp,
         Intent::ToggleSpeech,
-        Intent::StopSpeech,
-        Intent::SpeechFaster,
-        Intent::SpeechSlower,
-        Intent::SpeechNextPhrase,
-        Intent::SpeechPreviousPhrase,
-        Intent::SpeechNextParagraph,
-        Intent::SpeechPreviousParagraph,
-        Intent::SpeechReadHere,
-        Intent::SpeechToggleFollow,
         Intent::Close,
+    ];
+}
+
+/// A reading-mode action. While read-aloud has a session, these fixed (not remappable) keys
+/// take precedence over the global bindings; see `input::decode_reading`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum ReadingAction {
+    /// Pause or resume.
+    TogglePause,
+    /// Stop reading, clear the highlight, and leave reading mode.
+    Stop,
+    /// Increase playback speed by 0.1× (pitch preserved).
+    Faster,
+    /// Decrease playback speed by 0.1× (pitch preserved).
+    Slower,
+    /// Skip to the next bounded speech phrase, without changing pause/speed.
+    NextPhrase,
+    /// Restart the phrase after two audible seconds, otherwise go to the preceding one.
+    PreviousPhrase,
+    /// Skip to the next display-derived paragraph/block.
+    NextParagraph,
+    /// Skip to the start of the preceding display-derived paragraph/block.
+    PreviousParagraph,
+    /// Read from the phrase containing the selection, visible search match, or viewport top.
+    ReadHere,
+    /// Toggle following the playback cursor independently of browsing.
+    ToggleFollow,
+}
+
+impl ReadingAction {
+    pub const ALL: [ReadingAction; 10] = [
+        ReadingAction::TogglePause,
+        ReadingAction::Stop,
+        ReadingAction::Faster,
+        ReadingAction::Slower,
+        ReadingAction::NextPhrase,
+        ReadingAction::PreviousPhrase,
+        ReadingAction::NextParagraph,
+        ReadingAction::PreviousParagraph,
+        ReadingAction::ReadHere,
+        ReadingAction::ToggleFollow,
     ];
 }
 
@@ -319,15 +334,6 @@ mod tests {
                 | Intent::TreeScrollRight
                 | Intent::ShowHelp
                 | Intent::ToggleSpeech
-                | Intent::StopSpeech
-                | Intent::SpeechFaster
-                | Intent::SpeechSlower
-                | Intent::SpeechNextPhrase
-                | Intent::SpeechPreviousPhrase
-                | Intent::SpeechNextParagraph
-                | Intent::SpeechPreviousParagraph
-                | Intent::SpeechReadHere
-                | Intent::SpeechToggleFollow
                 | Intent::Close => (false, false),
             };
             assert!(
@@ -340,6 +346,29 @@ mod tests {
                 "only AddAnnotation may edit session-only annotation state"
             );
         }
+    }
+
+    #[test]
+    fn reading_actions_never_mutate_files_or_git() {
+        // AC-N3 for the reading-mode keys that replaced the global speech intents: the
+        // exhaustive match fails to compile when an action is added, forcing the same decision.
+        for action in ReadingAction::ALL {
+            let mutates_file_or_git = match action {
+                ReadingAction::TogglePause
+                | ReadingAction::Stop
+                | ReadingAction::Faster
+                | ReadingAction::Slower
+                | ReadingAction::NextPhrase
+                | ReadingAction::PreviousPhrase
+                | ReadingAction::NextParagraph
+                | ReadingAction::PreviousParagraph
+                | ReadingAction::ReadHere
+                | ReadingAction::ToggleFollow => false,
+            };
+            assert!(!mutates_file_or_git, "{action:?} must stay read-only");
+        }
+        let unique: HashSet<ReadingAction> = ReadingAction::ALL.iter().copied().collect();
+        assert_eq!(unique.len(), ReadingAction::ALL.len());
     }
 
     #[test]
@@ -396,16 +425,7 @@ mod tests {
                 Some(Intent::TreeScrollLeft) => Intent::TreeScrollRight,
                 Some(Intent::TreeScrollRight) => Intent::ShowHelp,
                 Some(Intent::ShowHelp) => Intent::ToggleSpeech,
-                Some(Intent::ToggleSpeech) => Intent::StopSpeech,
-                Some(Intent::StopSpeech) => Intent::SpeechFaster,
-                Some(Intent::SpeechFaster) => Intent::SpeechSlower,
-                Some(Intent::SpeechSlower) => Intent::SpeechNextPhrase,
-                Some(Intent::SpeechNextPhrase) => Intent::SpeechPreviousPhrase,
-                Some(Intent::SpeechPreviousPhrase) => Intent::SpeechNextParagraph,
-                Some(Intent::SpeechNextParagraph) => Intent::SpeechPreviousParagraph,
-                Some(Intent::SpeechPreviousParagraph) => Intent::SpeechReadHere,
-                Some(Intent::SpeechReadHere) => Intent::SpeechToggleFollow,
-                Some(Intent::SpeechToggleFollow) => Intent::Close,
+                Some(Intent::ToggleSpeech) => Intent::Close,
                 Some(Intent::Close) => break,
             };
             listed.push(next);

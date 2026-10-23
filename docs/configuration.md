@@ -262,16 +262,7 @@ customized).
 | | `reveal_in_file_manager` | `R` | Reveal the selected entry in the OS file manager |
 | | `copy_repo_path` | `y` | Copy the selected node's repo-relative path to the clipboard |
 | | `copy_abs_path` | `Y` | Copy the selected node's absolute path to the clipboard |
-| | `toggle_speech` | `t` | Start read-aloud from visible text, or pause/resume |
-| | `stop_speech` | `T` | Stop read-aloud |
-| | `speech_faster` | `+` | Increase playback speed by 0.1× |
-| | `speech_slower` | `-` | Decrease playback speed by 0.1× |
-| | `speech_previous_phrase` | `(` | Previous phrase, or restart after two audible seconds |
-| | `speech_next_phrase` | `)` | Next phrase, preserving pause/speed |
-| | `speech_previous_paragraph` | `K` | Previous paragraph/block |
-| | `speech_next_paragraph` | `J` | Next paragraph/block |
-| | `speech_read_here` | `g` | Read from selected passage, visible search match, or viewport top |
-| | `speech_toggle_follow` | `F` | Toggle following playback independently of browsing |
+| | `toggle_speech` | `t` | Start read-aloud from visible text (entering reading mode, whose keys are fixed), or pause/resume |
 | **Annotations** | `add_annotation` | `a` | Add an in-memory annotation for the selected file |
 | | `show_annotations` | `A` | Open the session annotation overview |
 | **Search & jump** | `open_finder` | `f` | Open the go-to-file fuzzy finder |

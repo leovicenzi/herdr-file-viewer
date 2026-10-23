@@ -8,10 +8,14 @@ All notable changes to this project are documented here. The format is based on
 ## [Unreleased]
 
 ### Added
+- Read-aloud in Brazilian Portuguese (`pf_dora`), Spanish (`ef_dora`), French (`ff_siwis`), and Italian (`if_sara`) as well as English. The language is detected per block, so mixed-language documents switch voice per section. The status strip shows the current language, and every language keeps word highlighting. Numbers such as `3.5`, `3,5`, and `1.000` read naturally instead of pausing at the separator. → [read-aloud](docs/read-aloud.md#languages)
 - Read-aloud on Linux x86_64: the bundled helper runs Kokoro on PyTorch (CUDA by default, CPU fallback, `HERDR_TTS_DEVICE` override) where macOS arm64 keeps MLX. `scripts/setup-tts.sh` provisions either. → [read-aloud](docs/read-aloud.md)
-- Read-aloud navigation: `(`/`)` skip phrases, `K`/`J` skip paragraphs/blocks, `g` reads from a selected passage or visible search match, and `F` toggles following playback. Seeks preserve pause/speed and can move before the original start. A bounded, document-scoped in-memory audio cache accelerates revisits. → [read-aloud](docs/read-aloud.md)
+- Read-aloud navigation: skip by phrase or paragraph/block, read from a selected passage or visible search match, and toggle following playback. Seeks preserve pause/speed and can move before the original start. A bounded, document-scoped in-memory audio cache accelerates revisits. → [read-aloud](docs/read-aloud.md)
 - Markdown read-aloud joins visual soft line breaks before synthesis, retaining multi-line word/phrase highlights instead of pausing at each displayed line. Source hard breaks stay distinct from renderer padding. Oversized sentences prefer their last comma within the 240-character limit before falling back to a word boundary.
-- Local read-aloud with Kokoro/MLX: `t` reads or pauses, `T` stops, and `+`/`-` adjust pitch-preserving speed. Model-timed word highlighting, active-phrase shading, and viewport following work against the displayed text. Optional, offline after explicit setup; speech is cancelled on file/view changes. → [read-aloud](docs/read-aloud.md)
+- Local read-aloud with Kokoro/MLX: `t` reads or pauses, with stop and pitch-preserving speed controls. Model-timed word highlighting, active-phrase shading, and viewport following work against the displayed text. Optional, offline after explicit setup; speech is cancelled on file/view changes. → [read-aloud](docs/read-aloud.md)
+
+### Changed
+- Read-aloud controls are now a media-player **reading mode**: `t` starts reading (and still pauses/resumes), then `Space` pauses, `←`/`→` move by phrase, `↑`/`↓` by paragraph, `=`/`-` change speed, `Enter` reads from the selection or search match, `f` toggles follow, and `Esc` stops. The global `T`, `+`, `-`, `(`, `)`, `J`, `K`, `g`, and `F` read-aloud keys and their `[keys]` names are gone, which frees those keys again. → [keys](docs/keys.md#reading-mode)
 
 ### Fixed
 - Installing this fork no longer downloads upstream's same-version prebuilt binary, which lacks read-aloud. The installer looks for releases in the fork, finds none, and builds from source. → [read-aloud](docs/read-aloud.md)

@@ -72,6 +72,10 @@ done
         "controller joins Markdown display lines before synthesis"
     );
     session.set_expect_timeout(Some(Duration::from_secs(15)));
+    // The ACK proves a session exists, so reading mode owns q: the first stops reading,
+    // the second (from the observed idle status) quits.
+    session.send("q").unwrap();
+    session.expect("Local").unwrap();
     session.send("q").unwrap();
     session.expect(Eof).unwrap();
 }
@@ -119,12 +123,20 @@ done
     let mut session = Session::spawn(cmd).unwrap();
     session.set_expect_timeout(Some(Duration::from_secs(15)));
     session.expect("Third").unwrap();
-    // As in the joining journey, the first preview can precede its settled reflow.
-    // g retries a destination rather than toggling pause while initialization finishes.
+    // As in the joining journey, the first preview can precede its settled reflow, and
+    // t is refused until it settles. t toggles pause once a session exists, so it is only
+    // resent while the helper log proves no `speak` has arrived yet.
     session.set_expect_timeout(Some(Duration::from_secs(1)));
+    let spoke = || {
+        std::fs::read_to_string(&log)
+            .unwrap_or_default()
+            .contains(r#""cmd":"speak""#)
+    };
     let mut reading = false;
     for _ in 0..15 {
-        session.send("g").unwrap();
+        if !spoke() {
+            session.send("t").unwrap();
+        }
         match session.expect("Reading") {
             Ok(_) => {
                 reading = true;
@@ -138,7 +150,7 @@ done
     session.set_expect_timeout(Some(Duration::from_secs(15)));
     session.send("t").unwrap();
     session.expect("Paused").unwrap();
-    session.send("+").unwrap();
+    session.send("=").unwrap();
     let records = || -> Vec<serde_json::Value> {
         std::fs::read_to_string(&log)
             .unwrap_or_default()
@@ -153,7 +165,15 @@ done
         .unwrap();
     let document = first["document"].as_u64().unwrap();
     let mut previous_id = first["id"].as_u64().unwrap();
-    for (key, offset) in [(")", 1), ("J", 3), ("K", 1), ("(", 0), ("g", 0)] {
+    // Reading mode: → next phrase, ↓ next block, ↑ previous block, ← previous phrase,
+    // Enter reads from the viewport top.
+    for (key, offset) in [
+        ("\x1b[C", 1),
+        ("\x1b[B", 3),
+        ("\x1b[A", 1),
+        ("\x1b[D", 0),
+        ("\r", 0),
+    ] {
         session.send(key).unwrap();
         let deadline = std::time::Instant::now() + Duration::from_secs(10);
         loop {
@@ -169,12 +189,14 @@ done
             }
             assert!(
                 std::time::Instant::now() < deadline,
-                "key {key} did not reach helper"
+                "key {key:?} did not reach helper"
             );
             std::thread::yield_now();
         }
     }
-    session.send("T").unwrap();
+    // q is reading mode's alias for Esc (stop); a lone ESC byte would race the pty's
+    // escape-sequence parsing.
+    session.send("q").unwrap();
     session.expect("Local").unwrap();
     session.send("q").unwrap();
     session.expect(Eof).unwrap();
@@ -222,13 +244,13 @@ done
         .expect("t pauses without losing the file");
     session.send("t").unwrap();
     // Resume transitions via loading; the paused status has to disappear, but no
-    // progress need arrive yet. '+' reaches the running backend and the stub ACKs
+    // progress need arrive yet. '=' reaches the running backend and the stub ACKs
     // it with a distinctive error, proving the protocol path without a timing guess.
-    session.send("+").unwrap();
+    session.send("=").unwrap();
     session
         .expect("TEMPOACK")
         .expect("rate command reaches helper; errors are visible");
-    session.send("T").unwrap();
+    session.send("q").unwrap();
     session
         .expect("Local")
         .expect("stop clears the error and restores idle status");

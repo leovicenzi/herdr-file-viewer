@@ -10,12 +10,14 @@ use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex, mpsc};
 
 mod chunking;
+mod language;
 #[cfg(test)]
 mod mailbox_tests;
 pub use chunking::{
     SpeechChunk, SpeechPart, TextMode, TextRange, chunk_at, chunks, index as index_chunks,
     markdown_chunks, markdown_source_chunks,
 };
+pub use language::{BlockKind, SpeechLang};
 
 pub const MIN_SPEED: f64 = 0.5;
 pub const MAX_SPEED: f64 = 2.5;
@@ -266,6 +268,11 @@ impl ReadAloud {
         self.follow = !self.follow;
     }
 
+    /// A session lasts from start until `stop`, through finishing or failing.
+    pub fn in_session(&self) -> bool {
+        !self.chunks.is_empty() || self.phase == Phase::Failed
+    }
+
     pub fn active(&self) -> bool {
         matches!(self.phase, Phase::Loading | Phase::Speaking | Phase::Paused)
     }
@@ -322,11 +329,14 @@ impl ReadAloud {
                     } else {
                         "Finished"
                     };
-                    format!(
-                        "{state} · {:.1}× · t read · g here · F follow {}",
-                        self.speed,
-                        if self.follow { "on" } else { "off" }
-                    )
+                    if self.chunks.is_empty() {
+                        format!("{state} · {:.1}× · t read", self.speed)
+                    } else {
+                        format!(
+                            "{state} · {:.1}× · Space read · ←→ phrase · ↑↓ block · Esc stop",
+                            self.speed
+                        )
+                    }
                 });
             }
             Phase::Loading => "Preparing local speech",
@@ -334,22 +344,26 @@ impl ReadAloud {
             Phase::Paused => "Paused",
             Phase::Failed => {
                 return Some(format!(
-                    "Read-aloud: {} · t retry · T dismiss",
+                    "Read-aloud: {} · t retry · Esc dismiss",
                     self.error.as_deref().unwrap_or("helper failed")
                 ));
             }
         };
         Some(format!(
-            "{state} · {:.1}× · {}/{} · F follow {} · t {} · () phrase · K/J block · g here",
+            "{state} · {} · {:.1}× · {}/{} · Space {} · ←→ phrase · ↑↓ block · =- speed · Enter here · f follow {} · Esc stop",
+            self.chunks
+                .get(self.current)
+                .map_or(SpeechLang::En, |c| c.lang)
+                .label(),
             self.speed,
             self.current + 1,
             self.chunks.len(),
-            if self.follow { "on" } else { "off" },
             if self.phase == Phase::Paused {
                 "resume"
             } else {
                 "pause"
-            }
+            },
+            if self.follow { "on" } else { "off" },
         ))
     }
 

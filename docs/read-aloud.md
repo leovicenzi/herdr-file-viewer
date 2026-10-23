@@ -1,8 +1,9 @@
 # Local read-aloud
 
 This optional feature reads the **displayed text**, locally, using the Apache-2.0
-[Kokoro 82M](https://huggingface.co/hexgrad/Kokoro-82M) model, American English
-voice `af_heart`. Kokoro is much lighter than voice-cloning/conversational models.
+[Kokoro 82M](https://huggingface.co/hexgrad/Kokoro-82M) model, in **English, Brazilian
+Portuguese, Spanish, French, and Italian** (see [Languages](#languages)). Kokoro is much lighter than
+voice-cloning/conversational models.
 The bundled helper picks its inference backend by platform:
 
 | Platform | Backend | Model |
@@ -12,6 +13,49 @@ The bundled helper picks its inference backend by platform:
 
 Both use the same Misaki phonemizer and report the same token timestamps, so word
 highlighting behaves identically.
+
+## Languages
+
+The language is detected automatically, **per block** (paragraph, heading, list item,
+table or code row), so a document can mix sections in any of these languages:
+
+| Language | Voice | Phonemizer |
+| --- | --- | --- |
+| English | `af_heart` | Misaki |
+| Brazilian Portuguese | `pf_dora` | espeak-ng |
+| Spanish | `ef_dora` | espeak-ng |
+| French | `ff_siwis` | espeak-ng |
+| Italian | `if_sara` | espeak-ng |
+
+- A block of six or more words is classified by its text
+  ([whatlang](https://github.com/greyblake/whatlang-rs), limited to these five languages).
+- A shorter block switches language only on a letter unique to one of them (`ã õ`
+  Portuguese, `ñ ¿ ¡` Spanish, `œ î ï û ë ÿ` French, `ì ò` Italian; shared letters such
+  as `ç` or `à` decide nothing). Otherwise it inherits: a heading takes the language of
+  the block after it (the section it introduces), anything else the block before it.
+  The document's overall language is the fallback.
+- Code is read in English and does not change the language of the prose around it.
+  In rendered Markdown, code is recognized by indentation or by two or more syntax
+  colors; a short, single-color code block (e.g. a one-line shell command) looks like
+  prose there and takes the language of the text around it.
+- The status strip shows the current phrase's language (`EN`/`PT`/`ES`/`FR`/`IT`). There is no
+  manual override.
+
+A phrase is spoken in a single language: foreign words inside a sentence ("faça o
+commit") take the block language's pronunciation. Detection reads the displayed text
+only; it never sees source metadata such as an HTML `lang` attribute.
+
+Numbers are spelled out for the espeak-ng languages, which would otherwise read the
+separator in `3.5` or `3,5` as a sentence pause and `1.000` digit by digit. Dot-separated
+groups of exactly three digits are thousands (`1.000` reads "mil", `1.000,50` "mil
+vírgula cinquenta"); any other `.`/`,` between digits is spoken as the language's word
+for it (`3.5` "três ponto cinco", `3,5` "três vírgula cinco", `1.18.0` "um ponto dezoito
+ponto zero"). This rewrite only affects synthesis. English numbers are left to Misaki.
+
+Kokoro returns word timestamps only for English. For the other languages the helper
+derives them from the model's per-phoneme durations, phonemizing each word alone so
+spoken-out numbers ("1990") stay attached to their word. When the two disagree, that
+phrase keeps only its phrase shading, never a guessed word.
 
 ## One-time setup
 
@@ -31,8 +75,9 @@ sh scripts/setup-tts.sh
 cargo build --release
 ```
 
-Setup downloads packages, model weights, voices, and English language data, then
-warms the model without playing sound. Python (3.11 on macOS, 3.12 on Linux) is
+Setup downloads packages, model weights, the five voices, and English language data
+(the other languages use the bundled espeak-ng), then warms each language without
+playing sound. Python (3.11 on macOS, 3.12 on Linux) is
 isolated in `.venv-tts` (gitignored); no system Python packages are changed. On Linux,
 setup installs the CUDA 13 PyTorch build (several GB, needs an NVIDIA driver that
 supports CUDA 13). Set `TTS_TORCH_INDEX=cpu` before running setup for a much smaller
@@ -45,7 +90,7 @@ are cached by Hugging Face.
 On Linux, `HERDR_TTS_DEVICE` (in the helper's environment) overrides the PyTorch
 device, e.g. `cpu` to leave a hybrid laptop's discrete GPU asleep. A warm CUDA
 context keeps the GPU powered while the helper runs, which is from the first `t` until
-the viewer exits (`T` stops playback but keeps the model warm).
+the viewer exits (`Esc` stops playback but keeps the model warm).
 
 The bundled runtime supports **macOS arm64 and Linux x86_64**. Other platforms still
 build and browse normally, and can supply another backend using `tts_command`. Missing setup,
@@ -56,23 +101,32 @@ than terminating the viewer. The helper starts only on the first explicit read.
 
 | Key | Action |
 | --- | --- |
-| `t` | Read from the **phrase at the top visible line** of the settled active preview; while reading, pause/resume |
-| `T` (Shift+`t`) | Stop and clear the highlight; the next `t` starts at the then-visible line |
-| `+` / `-` | Adjust speed by 0.1×, from 0.5× to 2.5×, without changing pitch |
-| `(` / `)` | Previous / next speech phrase. Previous restarts the current phrase after two audible seconds; otherwise it goes back one |
-| `K` / `J` | Previous / next paragraph/block (Shift+`k` / Shift+`j`). No wrap; previous at the first block restarts it |
-| `g` | Read from the phrase containing the selection, visible current search match, or viewport top, in that priority order |
-| `F` | Toggle follow playback (Shift+`f`); on by default, with its state shown in the status strip |
+`t` is the only global read-aloud key (remappable as `toggle_speech`). It reads from the
+**phrase at the top visible line** of the settled active preview and enters **reading
+mode**; pressed again, it pauses/resumes. Reading mode lasts until `Esc`, including after
+the document finishes, and owns these fixed, media-player keys:
 
-The status strip reports idle/loading/reading/paused/finished, speed, phrase position, and follow state. With a
+| Key | Action |
+| --- | --- |
+| `Space` | Pause / resume |
+| `←` / `→` | Previous / next speech phrase. Previous restarts the current phrase after two audible seconds; otherwise it goes back one |
+| `↑` / `↓` | Previous / next paragraph/block. No wrap; previous at the first block restarts it |
+| `=` (or `+`) / `-` | Adjust speed by 0.1×, from 0.5× to 2.5×, without changing pitch |
+| `Enter` | Read from the phrase containing the selection, visible current search match, or viewport top, in that priority order |
+| `f` | Toggle follow playback; on by default, with its state shown in the status strip |
+| `Esc` / `q` | Stop, clear the highlight, and leave reading mode; the next `t` starts at the then-visible line |
+
+Every other key keeps its global meaning, so `j`/`k`, `PgUp`/`PgDn`, `/` search, and `n`/`N`
+browse while listening. Reading-mode keys need no Shift on US or ABNT2 layouts.
+
+The status strip reports idle/loading/reading/paused/finished, the phrase's language, speed, phrase position, and follow state. With a
 backend configured its row stays reserved even while idle, so starting speech or
-changing speed cannot resize/reflow the preview and invalidate its coordinates. A shaded
-phrase gives context; the current word is yellow/bold. With follow on, the active
-preview scrolls when the spoken line leaves the viewport. As with other global
-keys, close a finder, search prompt, or help before using these controls.
-Line-select mode keeps its fixed `J`/`K` extension controls and adds a fixed local
-`g` confirm to read from the selection; other speech controls remain modal-gated.
-`Space` retains its existing page-down behavior, not pause.
+changing speed cannot resize/reflow the preview and invalidate its coordinates. While reading
+it also lists the reading-mode keys. A shaded phrase gives context; the current word is
+yellow/bold. With follow on, the active preview scrolls when the spoken line leaves the
+viewport. A finder, search prompt, help, line-select, or annotation modal owns its keys while
+open; close it to use the reading-mode keys again. Line-select mode keeps its fixed `J`/`K`
+extension controls and a fixed local `g` confirm to read from the selection.
 
 Speech follows the sanitized renderer output, including rendered Markdown and
 code. Syntax-renderer line-number gutters and decorative-only lines are skipped.
@@ -96,7 +150,7 @@ split at commas. These bounded phrase seams can still introduce a pause.
 Text indexing is bounded to 4 MiB / 32768 phrases of the settled preview. Audio
 requests use rolling windows of at most 256 KiB / 2048 phrases and automatically
 advance to the next window. Only the current/prefetched phrases are synthesized,
-not the entire index. For larger configured previews, `g` outside the indexed
+not the entire index. For larger configured previews, `Enter` outside the indexed
 prefix opens a new local index there; backward navigation is then limited to
 that index. Existing renderer preview/truncation limits still apply.
 
@@ -112,7 +166,7 @@ the destination phrase without starting audio. While playing, a seek clears the
 old audio and starts the destination; cached destinations are faster, but neither
 cache hits nor new synthesis promise gapless/instant seeking. Each seek has a new
 playback ID, so queued progress from the old position cannot repaint the target.
-At the end, the text index remains available for Previous; `T` clears it.
+At the end, the text index remains available for Previous; `Esc` clears it.
 
 The index normally includes text before the initial starting point, so Previous
 can go back before where you first pressed `t`. A phrase is a sentence or a bounded
@@ -124,20 +178,20 @@ this is not a Markdown AST/source-position guarantee.
 
 To choose somewhere else while listening:
 
-1. Press `F` to turn follow **off**, so playback does not pull your viewport back.
-2. Scroll/search to the passage. Either select text with the mouse, use the current
+1. Press `f` to turn follow **off**, so playback does not pull your viewport back.
+2. Scroll (`j`/`k`, `PgUp`/`PgDn`) or search (`/`, `n`/`N`) to the passage. Either select text with the mouse, use the current
    visible search result, or leave the desired line at the top of the viewport.
    For keyboard line selection, `Tab` to content and press `L`, then move the marker.
    (`L` switches transformed views to source, which stops existing playback.)
-3. Press `g`. Reading begins at the **containing phrase**, which may repeat text
+3. Press `Enter` (or `g` in line-select mode). Reading begins at the **containing phrase**, which may repeat text
    before your caret; a selection is a starting anchor, not a playback end boundary.
    The selection is consumed so it does not obscure the spoken highlight.
-4. Press `F` again if you want automatic following back on. It immediately reveals
+4. Press `f` again if you want automatic following back on. It immediately reveals
    the current phrase, even when paused. Follow is temporarily suppressed while
    a modal or drag owns the browsing cursor.
 
-`n`/`N`, `[`/`]`, and normal arrows keep their existing search/file/scroll meanings.
-The new global actions are remappable; line-select's local controls remain fixed.
+`n`/`N`, `[`/`]`, and `j`/`k` keep their search/file/scroll meanings while reading; the arrows
+belong to reading mode until `Esc`.
 
 ## Timing and performance
 
@@ -174,19 +228,15 @@ tts_speed = 1.0
 # tts_command = '/absolute/plugin/.venv-tts/bin/python -u /absolute/plugin/scripts/read_aloud.py'
 ```
 
-`? → Settings` shows both values. `[keys]` supports `toggle_speech`, `stop_speech`,
-`speech_faster`, `speech_slower`, `speech_previous_phrase`, `speech_next_phrase`,
-`speech_previous_paragraph`, `speech_next_paragraph`, `speech_read_here`, and
-`speech_toggle_follow` like other actions.
+`? → Settings` shows both values. `[keys]` remaps `toggle_speech` like other actions; the
+reading-mode keys are fixed.
 
 Set `HERDR_FILE_VIEWER_NO_TTS=1` to disable the optional backend and its idle
 status row (also used by non-audio PTY tests, independently of local runtime setup).
 
-The helper accepts `HERDR_TTS_VOICE` and `HERDR_TTS_LANG` in its environment.
-For example, Kokoro uses `p` for Brazilian Portuguese and voices such as
-`pf_dora`; the language and voice must agree. Only the default English setup is
-provisioned/tested by `setup-tts.sh`; install/pre-cache any additional phonemizer
-language data explicitly before using another language offline.
+The helper accepts `HERDR_TTS_VOICE` in its environment to replace the English voice
+(any American English Kokoro voice, e.g. `am_michael`); pre-cache a new voice by running
+setup with it set. The other languages' voices are fixed.
 
 ## Backend protocol
 
@@ -196,7 +246,7 @@ The controller sends JSON lines (text is **never** in argv or interpolated into 
 shell command):
 
 ```json
-{"cmd":"speak","id":3,"document":1,"offset":0,"paused":false,"chunks":[{"text":"Hello.","line":0,"start":0,"end":6}],"speed":1.0}
+{"cmd":"speak","id":3,"document":1,"offset":0,"paused":false,"chunks":[{"text":"Hello.","line":0,"start":0,"end":6,"lang":"en"}],"speed":1.0}
 {"cmd":"pause","id":3,"paused":true}
 {"cmd":"speed","id":3,"speed":1.5}
 {"cmd":"stop","id":3}
@@ -210,7 +260,9 @@ A backend emits one JSON object per line on stdout (all diagnostics go to stderr
 {"event":"error","id":3,"message":"Output device unavailable"}
 ```
 
-`start`/`end` are optional UTF-8 byte offsets **within the phrase**, not character
+Each chunk's `lang` is `en`, `pt`, `es`, `fr`, or `it`; backends that ignore it read everything in
+one language. The bundled helper rejects any other value and treats a missing `lang`
+as `en`. `start`/`end` are optional UTF-8 byte offsets **within the phrase**, not character
 indices, and identify the current word. Omitting them highlights only the phrase.
 Markdown phrases may span multiple displayed lines; the viewer retains their
 byte-exact source map locally. The command's `line`/`start`/`end` metadata describes
