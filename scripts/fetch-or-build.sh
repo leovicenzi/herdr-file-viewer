@@ -15,7 +15,9 @@
 # FV_BASE_URL) so the logic is exercised by a hermetic test with stubbed uname/curl/cargo/git.
 set -u
 
-repo="smarzban/herdr-file-viewer"
+# This fork publishes no releases, so the download misses and the source (with read-aloud) is
+# built. Upstream's same-version prebuilt would silently install a binary without it.
+repo="leovicenzi/herdr-file-viewer"
 
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 repo_root="${FV_REPO_ROOT:-$script_dir/..}"

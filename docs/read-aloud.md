@@ -15,6 +15,12 @@ highlighting behaves identically.
 
 ## One-time setup
 
+This fork (`leovicenzi/herdr-file-viewer`) publishes no prebuilt binaries:
+`herdr plugin install leovicenzi/herdr-file-viewer` always compiles from source, so it
+needs Rust 1.96+ (e.g. `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`).
+An install whose viewer ignores `t` likely predates this and runs upstream's binary;
+run `cargo build --release` in the plugin directory shown by `herdr plugin list`.
+
 Install `uv` and FFmpeg, then provision the optional Python environment and model
 from the plugin's **trusted checkout**, not from a browsed repository:
 
