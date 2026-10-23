@@ -204,7 +204,7 @@ fn help_composes_exact_tagged_and_head_documents_from_the_completed_snapshot() {
     for expected in [
         "HEAD-SPOTLIGHT-BODY-ONLY",
         "TAGGED-DETAILS-ONLY",
-        "herdr plugin install smarzban/herdr-file-viewer",
+        "herdr plugin install leovicenzi/herdr-file-viewer",
     ] {
         assert!(body.contains(expected), "missing {expected:?}:\n{body}");
     }
@@ -275,7 +275,7 @@ fn help_keeps_valid_neighbors_when_each_remote_document_fails_independently() {
         let body = flatten(controller.help_state().unwrap().active_body());
 
         assert!(
-            body.contains("herdr plugin install smarzban/herdr-file-viewer"),
+            body.contains("herdr plugin install leovicenzi/herdr-file-viewer"),
             "{name}: a detected release retains fixed local install copy:\n{body}"
         );
         assert!(
@@ -375,5 +375,5 @@ fn discovery_failure_never_calls_documents_or_adds_remote_help_content() {
     assert!(body.contains("## [1.14.0]"));
     assert!(!body.contains("TAGGED-DETAILS-ONLY"));
     assert!(!body.contains("HEAD-SPOTLIGHT-BODY-ONLY"));
-    assert!(!body.contains("herdr plugin install smarzban/herdr-file-viewer"));
+    assert!(!body.contains("herdr plugin install leovicenzi/herdr-file-viewer"));
 }

@@ -6,6 +6,14 @@
 ![herdr 0.7.5+](https://img.shields.io/badge/herdr-0.7.5%2B-8a2be2)
 ![platforms: linux • macOS • Windows (preview)](https://img.shields.io/badge/platforms-linux%20%E2%80%A2%20macOS%20%E2%80%A2%20Windows%20(preview)-informational)
 
+> [!NOTE]
+> **This is a fork of [smarzban/herdr-file-viewer](https://github.com/smarzban/herdr-file-viewer)**
+> that adds **local read-aloud**: press `t` to hear the preview in English, Portuguese, Spanish,
+> French, or Italian, offline (Kokoro TTS on Apple Silicon or Linux), with word highlighting and a
+> media-player reading mode. See [docs/read-aloud.md](docs/read-aloud.md). Everything else follows
+> upstream. This fork publishes no prebuilt binaries, so installing it builds from source and needs
+> Rust 1.96+.
+
 **A git-aware, read-only file viewer in a herdr pane.** Tree on the left. On the right, the view
 that file deserves: a **diff** if it changed, **rendered markdown**, or **highlighted code**.
 Agents can drop you on a file or a line. You pin one file, mark a range, and paste those notes
@@ -67,17 +75,21 @@ guide](docs/usage.md) explains each feature. These are the main keys:
 | `L` | Copy a `path:line` reference (or the selected lines) |
 | `Z` | Full-screen the current file |
 | `e` / `O` / `R` | Hand off: editor / OS default app / file manager |
+| `t` | Read aloud locally, then `Space` / `←→` / `↑↓` / `Esc` to control it |
 | `?` | Help overlay: What's New, keys, settings, about |
 
 ## Quick start
 
 ```bash
-# 1. Install the plugin (downloads a prebuilt binary for released versions; otherwise builds from source):
-herdr plugin install smarzban/herdr-file-viewer
+# 1. Install the plugin (this fork builds from source: needs Rust 1.96+, e.g. https://rustup.rs):
+herdr plugin install leovicenzi/herdr-file-viewer
 
 # 2. (recommended) install the renderers, so markdown / diffs / code are styled, not plain text:
 brew install glow git-delta bat     # macOS, or use your package manager
 #   Linux / cross-platform: run scripts/install-renderers.sh from the plugin dir (`herdr plugin list`)
+
+# 3. (optional) local read-aloud voices, from the plugin dir. Needs uv and ffmpeg:
+sh scripts/setup-tts.sh
 ```
 
 Then **bind a key** in your herdr config (`~/.config/herdr/config.toml`) so one press summons it:
@@ -155,7 +167,8 @@ Full docs live in **[docs/](docs/README.md)**:
 
 Bug reports and feature requests are welcome. [Open an
 issue](https://github.com/smarzban/herdr-file-viewer/issues), or see
-[CONTRIBUTING.md](CONTRIBUTING.md) to build, test, and submit a change.
+[CONTRIBUTING.md](CONTRIBUTING.md) to build, test, and submit a change. Read-aloud exists only in
+this fork, so please don't report read-aloud problems upstream.
 
 ## License
 

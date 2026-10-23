@@ -15,6 +15,7 @@ All notable changes to this project are documented here. The format is based on
 - Local read-aloud with Kokoro/MLX: `t` reads or pauses, with stop and pitch-preserving speed controls. Model-timed word highlighting, active-phrase shading, and viewport following work against the displayed text. Optional, offline after explicit setup; speech is cancelled on file/view changes. → [read-aloud](docs/read-aloud.md)
 
 ### Changed
+- Update notices check this fork instead of upstream, so none of them tells you to install upstream (which lacks read-aloud). The README and install docs name the fork. → [install](docs/install.md#updating)
 - Read-aloud controls are now a media-player **reading mode**: `t` starts reading (and still pauses/resumes), then `Space` pauses, `←`/`→` move by phrase, `↑`/`↓` by paragraph, `=`/`-` change speed, `Enter` reads from the selection or search match, `f` toggles follow, and `Esc` stops. The global `T`, `+`, `-`, `(`, `)`, `J`, `K`, `g`, and `F` read-aloud keys and their `[keys]` names are gone, which frees those keys again. → [keys](docs/keys.md#reading-mode)
 
 ### Fixed

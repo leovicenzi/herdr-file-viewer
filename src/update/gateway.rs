@@ -860,7 +860,7 @@ mod tests {
         assert_eq!(result, Source::Available(Some(b"release details".to_vec())));
         assert_curl_invocation(
             &fake,
-            "https://raw.githubusercontent.com/smarzban/herdr-file-viewer/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/CHANGELOG.md",
+            "https://raw.githubusercontent.com/leovicenzi/herdr-file-viewer/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/CHANGELOG.md",
         );
         assert_private_body_is_cleaned(&fake);
     }
@@ -1073,7 +1073,7 @@ mod tests {
         let command = curl_command_with_program(
             "curl",
             Path::new("body"),
-            "https://raw.githubusercontent.com/smarzban/herdr-file-viewer/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/CHANGELOG.md",
+            "https://raw.githubusercontent.com/leovicenzi/herdr-file-viewer/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/CHANGELOG.md",
             Duration::from_secs(5),
         )
         .expect("positive curl timeout builds a command");
@@ -1114,11 +1114,11 @@ mod tests {
         );
         assert_curl_invocation(
             &changelog,
-            "https://raw.githubusercontent.com/smarzban/herdr-file-viewer/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/CHANGELOG.md",
+            "https://raw.githubusercontent.com/leovicenzi/herdr-file-viewer/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/CHANGELOG.md",
         );
         assert_curl_invocation(
             &spotlight,
-            "https://raw.githubusercontent.com/smarzban/herdr-file-viewer/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb/project-spotlight.md",
+            "https://raw.githubusercontent.com/leovicenzi/herdr-file-viewer/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb/project-spotlight.md",
         );
         assert_private_body_is_cleaned(&changelog);
         assert_private_body_is_cleaned(&spotlight);

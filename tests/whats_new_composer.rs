@@ -297,7 +297,7 @@ fn detected_release_with_details_adds_local_install_guidance() {
         renderer.calls[0].document,
         format!("{REMOTE}\n{}", install_guidance())
     );
-    assert!(flatten(&body).contains("herdr plugin install smarzban/herdr-file-viewer"));
+    assert!(flatten(&body).contains("herdr plugin install leovicenzi/herdr-file-viewer"));
 }
 
 #[test]
@@ -326,7 +326,7 @@ fn detected_release_without_details_still_adds_local_install_guidance() {
         2,
         "install guidance is one Available updates document"
     );
-    assert!(flatten(&body).contains("herdr plugin install smarzban/herdr-file-viewer"));
+    assert!(flatten(&body).contains("herdr plugin install leovicenzi/herdr-file-viewer"));
 }
 
 #[test]
