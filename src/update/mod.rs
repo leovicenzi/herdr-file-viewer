@@ -31,7 +31,9 @@ const REFRESH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
 pub const DISABLE_ENV: &str = "HERDR_FILE_VIEWER_NO_UPDATE_CHECK";
 
 /// The only authority the public-source gateway may query (and the source of [`repo_slug`]).
-const OFFICIAL_REPOSITORY_URL: &str = "https://github.com/smarzban/herdr-file-viewer";
+/// This fork checks itself, not upstream: an upstream notice would tell users to
+/// `herdr plugin install smarzban/herdr-file-viewer`, replacing the fork (and read-aloud).
+const OFFICIAL_REPOSITORY_URL: &str = "https://github.com/leovicenzi/herdr-file-viewer";
 
 /// The fixed official repository HTTPS URL.
 pub fn repo_url() -> &'static str {
@@ -698,7 +700,7 @@ mod tests {
     #[test]
     fn repo_slug_is_owner_repo() {
         // Derived from CARGO_PKG_REPOSITORY so it stays correct if the repo moves.
-        assert_eq!(repo_slug(), "smarzban/herdr-file-viewer");
+        assert_eq!(repo_slug(), "leovicenzi/herdr-file-viewer");
     }
 
     #[test]

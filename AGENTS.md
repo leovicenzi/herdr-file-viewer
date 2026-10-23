@@ -48,6 +48,27 @@ The plugin is fully built and shipped publicly to **`smarzban/herdr-file-viewer`
 `src/` (lib + modules + thin binary), `herdr-plugin.toml`, CI, and tagged releases all exist.
 `main` is **protected** (PR + green CI required; force-push/delete blocked).
 
+### This fork
+
+This checkout is **`leovicenzi/herdr-file-viewer`**, a fork of upstream that adds local read-aloud
+(`src/speech*`, `src/controller/speech.rs`, `scripts/read_aloud.py`, `docs/read-aloud.md`). Its
+`main` is not protected, and it publishes no releases. These divergences are deliberate; do not
+"fix" them back to upstream:
+
+- `scripts/fetch-or-build.{sh,ps1}` look for prebuilt releases in this fork, find none, and build
+  from source. Upstream's same-version prebuilt would silently install a binary without read-aloud.
+- The update gateway (`OFFICIAL_REPOSITORY_URL` in `src/update/mod.rs`) queries this fork, and its
+  pinned-source tests name it. An upstream notice would tell users to install upstream instead.
+- README and `docs/install.md` install commands name the fork. The About screen (`Cargo.toml`
+  `repository`), `CONTRIBUTING.md`, and issue links keep pointing upstream: they credit the author,
+  and the fork has issues disabled.
+
+To take upstream changes: `git fetch upstream && git merge upstream/main` (remote `upstream` =
+`https://github.com/smarzban/herdr-file-viewer.git`). Expect conflicts in `src/input.rs`,
+`src/intent.rs`, the `CHANGELOG.md` `[Unreleased]` section, `docs/keys.md`, and
+`docs/configuration.md`. Never push upstream's tags here (`git push --tags`): the update check would
+treat them as this fork's releases.
+
 ### Architecture (the big picture)
 
 A **single in-process TUI owns both columns** (ADR-0002). It is not composed of multiple herdr

@@ -10,14 +10,11 @@ diffs). git 2.39 (Apple's Xcode git) is supported. The optional renderers (`glow
 The system `curl` is optional: without it, document retrieval is unavailable without an error.
 See [external renderers](renderers.md).
 
-> **No Rust toolchain needed when a prebuilt exists.** `herdr plugin install smarzban/herdr-file-viewer`
-> downloads a prebuilt, SHA-256-verified binary for your platform (macOS arm64/x86_64, Linux x86_64,
-> Windows x86_64 preview).
-> The prebuilt is matched by the **version the source declares**. When that version has a release,
-> you get it even if `main` has newer commits since the tag (a note tells you when unreleased
-> changes aren't in it). It builds from source with `cargo` (Rust 1.96+) only when there's no matching
-> prebuilt: an unsupported platform, or a declared version that hasn't been released yet. The install
-> command is the same either way.
+> **This fork builds from source.** `herdr plugin install leovicenzi/herdr-file-viewer` compiles
+> with `cargo` (Rust 1.96+), because the fork publishes no prebuilt binaries. The installer would
+> download a prebuilt, SHA-256-verified binary matching the **version the source declares**, but it
+> looks for releases in this fork, where there are none. Upstream's same-version prebuilt is never
+> used, since it lacks [read-aloud](read-aloud.md).
 
 **Install through herdr.** At install time, herdr runs the manifest's `[[build]]` step. The step
 downloads a prebuilt binary or compiles from source and produces
@@ -25,9 +22,9 @@ downloads a prebuilt binary or compiles from source and produces
 
 ```bash
 # install (and update, re-run any time to get the latest):
-herdr plugin install smarzban/herdr-file-viewer
+herdr plugin install leovicenzi/herdr-file-viewer
 # …optional: pin a specific older version for reproducibility:
-herdr plugin install smarzban/herdr-file-viewer --ref v1.0.0
+herdr plugin install leovicenzi/herdr-file-viewer --ref v1.0.0
 
 # or, for local development, link this checkout in place:
 cargo build --release            # plugin link does NOT run the [[build]] step, so build first
@@ -58,10 +55,13 @@ so two quick steps remain:
 ## Updating
 
 herdr has no plugin auto-update. An advisory status row can point to `?` for release details.
-Installation remains manual: re-run the install yourself to get the latest:
+In this fork that check queries `leovicenzi/herdr-file-viewer`, never upstream (an upstream notice
+would tell you to install upstream and lose read-aloud). The fork has no releases newer than the
+version it declares, so the row stays quiet. Installation remains manual: re-run the install
+yourself to get the latest:
 
 ```bash
-herdr plugin install smarzban/herdr-file-viewer
+herdr plugin install leovicenzi/herdr-file-viewer
 ```
 
 - You **don't** need `--ref` to stay current; it only *pins* a specific version (and a pin stays
