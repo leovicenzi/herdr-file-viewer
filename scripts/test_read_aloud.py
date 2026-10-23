@@ -34,6 +34,38 @@ class ReadAloudTests(unittest.TestCase):
         self.assertAlmostEqual(marks[2][1],(2+2*len(phonemes))/40)
         self.assertTrue(all(a<b for a,b,_,_ in marks))
 
+    def test_numbers_are_spelled_out_for_espeak_languages_only(self):
+        self.assertEqual(tts.speakable_numbers('pt','versão 3.5 e 3,5'),'versão 3 ponto 5 e 3 vírgula 5')
+        self.assertEqual(tts.speakable_numbers('pt','1.000 e 1.000.000 e 1.000,50'),'1000 e 1000000 e 1000 vírgula 50')
+        self.assertEqual(tts.speakable_numbers('es','release 1.18.0.'),'release 1 punto 18 punto 0.')
+        self.assertEqual(tts.speakable_numbers('fr','3,5 %'),'3 virgule 5 %')
+        self.assertEqual(tts.speakable_numbers('it','3.5'),'3 punto 5')
+        self.assertEqual(tts.speakable_numbers('pt','Fim. Outra frase, 3 itens.'),'Fim. Outra frase, 3 itens.','prose punctuation untouched')
+        self.assertEqual(tts.speakable_numbers('en','3.5 and 1,000'),'3.5 and 1,000','Misaki reads English numbers')
+
+    def test_rewritten_numbers_still_highlight_the_original_word(self):
+        vocab={c:1 for c in 'abcdefghijklmnopqrstuvwxyz '}
+        phon={'versão':'versao','3':'tres','ponto':'ponto','5':'sinko'}
+        phonemize=lambda t:(' '.join(phon[w] for w in t.split()),None)
+        sent=[]
+        class Pipeline:
+            model=types.SimpleNamespace(vocab=vocab)
+            g2p=staticmethod(phonemize)
+            def __call__(self,text,**kwargs):
+                sent.append(text)
+                ps=phonemize(text)[0]
+                yield types.SimpleNamespace(audio=np.ones(480,dtype=np.float32),graphemes=text,tokens=None,
+                    phonemes=ps,output=types.SimpleNamespace(pred_dur=[5]+[2]*len(ps)+[0]))
+        control=tts.Control()
+        job=dict(cmd='speak',id=1,document=10,offset=0,paused=False,speed=1.0,
+                 chunks=[{'text':'versão 3.5','lang':'pt'}])
+        tts.apply_command(control,job)
+        tts.generate_job(control,control.jobs.get_nowait(),single(Pipeline()),np)
+        self.assertEqual(sent,['versão 3 ponto 5'])
+        marks=control.results.get_nowait().marks
+        # "3.5" (bytes 8..11 of the original) spans all three spoken words.
+        self.assertEqual([m[2:] for m in marks],[(0,7),(8,11)])
+
     def test_duration_marks_refuse_to_guess_on_any_mismatch(self):
         vocab={c:1 for c in 'abcdefghijklmnopqrstuvwxyz '}
         g2p=lambda word:(word.lower(),None)

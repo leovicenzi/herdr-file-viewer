@@ -197,6 +197,24 @@ def torch_device(torch):
     return "cuda" if torch.cuda.is_available() else "cpu"
 
 
+# espeak-ng reads the separator in 3.5 / 3,5 as punctuation (a sentence pause) and 1.000
+# digit by digit, so numbers are spelled out for it. Misaki already reads English numbers.
+NUMBER_WORDS = {"pt": ("ponto", "vírgula"), "es": ("punto", "coma"),
+                "fr": ("point", "virgule"), "it": ("punto", "virgola")}
+GROUPED = re.compile(r"\b\d{1,3}(?:\.\d{3})+(?:,\d+)?\b")   # 1.000 / 1.000.000 / 1.000,50
+SEPARATED = re.compile(r"\b\d+(?:[.,]\d+)+\b")               # 3.5 / 3,5 / 1.18.0
+
+
+def speakable_numbers(lang, text):
+    """Synthesis-only rewrite; offsets reported to the viewer still index the original text."""
+    if lang not in NUMBER_WORDS:
+        return text
+    point, comma = NUMBER_WORDS[lang]
+    text = GROUPED.sub(lambda m: m.group().replace(".", "").replace(",", f" {comma} "), text)
+    return SEPARATED.sub(lambda m: m.group().replace(".", f" {point} ")
+                         .replace(",", f" {comma} "), text)
+
+
 def voice_for(lang):
     if lang == "en":
         return os.environ.get("HERDR_TTS_VOICE", "af_heart")
@@ -244,7 +262,7 @@ class Voices:
         return self.pipelines[lang]
 
 
-def duration_marks(text, phonemes, durations, vocab, g2p):
+def duration_marks(text, phonemes, durations, vocab, g2p, lang="en"):
     """Word timing for espeak languages, which Kokoro returns without token timestamps.
 
     Kokoro predicts one duration (in 1/40 s frames) per phoneme it kept, plus <bos>/<eos>.
@@ -274,7 +292,7 @@ def duration_marks(text, phonemes, durations, vocab, g2p):
     if current:
         groups.append(current)
     words = [(m.start(), m.end()) for m in re.finditer(r"\S+", text)]
-    counts = [len((g2p(text[s:e])[0] or "").split()) for s, e in words]
+    counts = [len((g2p(speakable_numbers(lang, text[s:e]))[0] or "").split()) for s, e in words]
     if sum(counts) != len(groups):
         return []
     marks, group = [], 0
@@ -286,7 +304,7 @@ def duration_marks(text, phonemes, durations, vocab, g2p):
     return marks
 
 
-def result_marks(text, result, pipeline):
+def result_marks(text, result, pipeline, lang="en"):
     if result.tokens:
         return word_marks(text, result.tokens)
     output = getattr(result, "output", None)
@@ -295,7 +313,7 @@ def result_marks(text, result, pipeline):
     g2p = getattr(pipeline, "g2p", None)
     if g2p is None:
         return []
-    return duration_marks(text, result.phonemes, durations, vocab, g2p)
+    return duration_marks(text, result.phonemes, durations, vocab, g2p, lang)
 
 
 def generate_job(control, job, voices, np):
@@ -311,7 +329,8 @@ def generate_job(control, job, voices, np):
         else:
             audios, marks, seconds, cursor = [], [], 0.0, 0
             pipeline = voices.pipeline(lang)
-            for result in pipeline(text, voice=voice_for(lang), speed=1.0):
+            spoken = speakable_numbers(lang, text)
+            for result in pipeline(spoken, voice=voice_for(lang), speed=1.0):
                 if ident != control.ident or control.closed.is_set():
                     break
                 audio = result.audio
@@ -319,11 +338,19 @@ def generate_job(control, job, voices, np):
                     audio = audio.detach().cpu()
                 audio = np.asarray(audio, dtype=np.float32).reshape(-1)
                 segment = result.graphemes
+                if spoken != text:
+                    # Rewritten numbers: marks map back to the original words only when one
+                    # result covers the whole phrase, as it does for these bounded phrases.
+                    if segment.strip() == spoken.strip():
+                        marks.extend(result_marks(text, result, pipeline, lang))
+                    audios.append(audio)
+                    seconds += len(audio) / SAMPLE_RATE
+                    continue
                 at = text.find(segment, cursor)
                 if at >= 0:
                     byte_offset = len(text[:at].encode())
                     marks.extend((a+seconds, b+seconds, s+byte_offset, e+byte_offset)
-                                 for a,b,s,e in result_marks(segment, result, pipeline))
+                                 for a,b,s,e in result_marks(segment, result, pipeline, lang))
                     cursor = at + len(segment)
                 audios.append(audio)
                 seconds += len(audio) / SAMPLE_RATE

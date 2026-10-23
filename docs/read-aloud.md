@@ -45,6 +45,13 @@ A phrase is spoken in a single language: foreign words inside a sentence ("faça
 commit") take the block language's pronunciation. Detection reads the displayed text
 only; it never sees source metadata such as an HTML `lang` attribute.
 
+Numbers are spelled out for the espeak-ng languages, which would otherwise read the
+separator in `3.5` or `3,5` as a sentence pause and `1.000` digit by digit. Dot-separated
+groups of exactly three digits are thousands (`1.000` reads "mil", `1.000,50` "mil
+vírgula cinquenta"); any other `.`/`,` between digits is spoken as the language's word
+for it (`3.5` "três ponto cinco", `3,5` "três vírgula cinco", `1.18.0` "um ponto dezoito
+ponto zero"). This rewrite only affects synthesis. English numbers are left to Misaki.
+
 Kokoro returns word timestamps only for English. For the other languages the helper
 derives them from the model's per-phoneme durations, phonemizing each word alone so
 spoken-out numbers ("1990") stay attached to their word. When the two disagree, that
