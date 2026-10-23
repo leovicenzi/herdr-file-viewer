@@ -430,6 +430,19 @@ fn event_loop(terminal: &mut DefaultTerminal, controller: &mut Controller) -> io
                         return Ok(());
                     }
                 }
+                // Reading mode: while read-aloud has a session, its fixed media-player keys win
+                // over the global bindings. Modals above still own their keys; any other key
+                // falls through to `input::decode` below, so scrolling and search keep working.
+                Event::Key(key)
+                    if key.kind == KeyEventKind::Press
+                        && controller.reading_mode_active()
+                        && let Some(action) = input::decode_reading(key) =>
+                {
+                    let fx = controller.handle_reading(action);
+                    if apply_input_effects(terminal, &mut dirty, fx, true) {
+                        return Ok(());
+                    }
+                }
                 Event::Key(key)
                     if key.kind == KeyEventKind::Press
                         && let Some(intent) = input::decode(key, controller.bindings()) =>

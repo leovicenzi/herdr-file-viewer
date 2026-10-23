@@ -9,7 +9,7 @@
 //! session-only in-memory state (AC-N3).
 
 use crate::config::KeySpec;
-use crate::intent::Intent;
+use crate::intent::{Intent, ReadingAction};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use std::collections::{HashMap, HashSet};
 use std::sync::OnceLock;
@@ -532,70 +532,7 @@ pub(crate) const REGISTRY: &[Binding] = &[
         intent: Intent::ToggleSpeech,
         name: "toggle_speech",
         default_keys: &[KeyCode::Char('t')],
-        description: "Read aloud from the visible text, or pause/resume reading.",
-        category: "Open & copy",
-    },
-    Binding {
-        intent: Intent::StopSpeech,
-        name: "stop_speech",
-        default_keys: &[KeyCode::Char('T')],
-        description: "Stop reading aloud and clear the spoken highlight.",
-        category: "Open & copy",
-    },
-    Binding {
-        intent: Intent::SpeechFaster,
-        name: "speech_faster",
-        default_keys: &[KeyCode::Char('+')],
-        description: "Increase reading speed by 0.1x (maximum 2.5x).",
-        category: "Open & copy",
-    },
-    Binding {
-        intent: Intent::SpeechSlower,
-        name: "speech_slower",
-        default_keys: &[KeyCode::Char('-')],
-        description: "Decrease reading speed by 0.1x (minimum 0.5x).",
-        category: "Open & copy",
-    },
-    Binding {
-        intent: Intent::SpeechNextPhrase,
-        name: "speech_next_phrase",
-        default_keys: &[KeyCode::Char(')')],
-        description: "Skip to the next spoken phrase (preserves pause and speed).",
-        category: "Open & copy",
-    },
-    Binding {
-        intent: Intent::SpeechPreviousPhrase,
-        name: "speech_previous_phrase",
-        default_keys: &[KeyCode::Char('(')],
-        description: "Restart after two seconds, otherwise go to the previous spoken phrase.",
-        category: "Open & copy",
-    },
-    Binding {
-        intent: Intent::SpeechNextParagraph,
-        name: "speech_next_paragraph",
-        default_keys: &[KeyCode::Char('J')],
-        description: "Skip playback to the next paragraph/block.",
-        category: "Open & copy",
-    },
-    Binding {
-        intent: Intent::SpeechPreviousParagraph,
-        name: "speech_previous_paragraph",
-        default_keys: &[KeyCode::Char('K')],
-        description: "Skip playback to the preceding paragraph/block.",
-        category: "Open & copy",
-    },
-    Binding {
-        intent: Intent::SpeechReadHere,
-        name: "speech_read_here",
-        default_keys: &[KeyCode::Char('g')],
-        description: "Read from the selection, visible search match, or top visible phrase.",
-        category: "Open & copy",
-    },
-    Binding {
-        intent: Intent::SpeechToggleFollow,
-        name: "speech_toggle_follow",
-        default_keys: &[KeyCode::Char('F')],
-        description: "Toggle following playback; turn off to browse independently.",
+        description: "Read aloud from the visible text (reading mode), or pause/resume.",
         category: "Open & copy",
     },
     Binding {
@@ -606,6 +543,46 @@ pub(crate) const REGISTRY: &[Binding] = &[
         category: "Session",
     },
 ];
+
+/// Reading mode's fixed keys, in help/docs order: (label, action). Media-player style, all
+/// reachable without Shift on US and ABNT2 layouts (`+` is accepted alongside `=`).
+pub const READING_KEYS: &[(&str, ReadingAction)] = &[
+    ("Space", ReadingAction::TogglePause),
+    ("←", ReadingAction::PreviousPhrase),
+    ("→", ReadingAction::NextPhrase),
+    ("↑", ReadingAction::PreviousParagraph),
+    ("↓", ReadingAction::NextParagraph),
+    ("=", ReadingAction::Faster),
+    ("-", ReadingAction::Slower),
+    ("Enter", ReadingAction::ReadHere),
+    ("f", ReadingAction::ToggleFollow),
+    ("Esc", ReadingAction::Stop),
+];
+
+/// Decode a key while read-aloud has a session. `None` falls through to the global bindings,
+/// so scrolling (`j`/`k`/`PgUp`/`PgDn`), search, and `t` keep working while reading. Ctrl/Alt
+/// chords are never reading keys.
+pub(crate) fn decode_reading(key: KeyEvent) -> Option<ReadingAction> {
+    if key
+        .modifiers
+        .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SUPER)
+    {
+        return None;
+    }
+    Some(match key.code {
+        KeyCode::Char(' ') => ReadingAction::TogglePause,
+        KeyCode::Left => ReadingAction::PreviousPhrase,
+        KeyCode::Right => ReadingAction::NextPhrase,
+        KeyCode::Up => ReadingAction::PreviousParagraph,
+        KeyCode::Down => ReadingAction::NextParagraph,
+        KeyCode::Char('=' | '+') => ReadingAction::Faster,
+        KeyCode::Char('-') => ReadingAction::Slower,
+        KeyCode::Enter => ReadingAction::ReadHere,
+        KeyCode::Char('f') => ReadingAction::ToggleFollow,
+        KeyCode::Esc | KeyCode::Char('q') => ReadingAction::Stop,
+        _ => return None,
+    })
+}
 
 /// Borrow the [keybinding registry](REGISTRY) rows: the single source of truth for each global
 /// action's default key(s), snake_case name, and description.
@@ -941,15 +918,6 @@ mod tests {
         (KeyCode::Char('u'), Intent::DismissUpdate),
         (KeyCode::Char('?'), Intent::ShowHelp),
         (KeyCode::Char('t'), Intent::ToggleSpeech),
-        (KeyCode::Char('T'), Intent::StopSpeech),
-        (KeyCode::Char('+'), Intent::SpeechFaster),
-        (KeyCode::Char('-'), Intent::SpeechSlower),
-        (KeyCode::Char(')'), Intent::SpeechNextPhrase),
-        (KeyCode::Char('('), Intent::SpeechPreviousPhrase),
-        (KeyCode::Char('J'), Intent::SpeechNextParagraph),
-        (KeyCode::Char('K'), Intent::SpeechPreviousParagraph),
-        (KeyCode::Char('g'), Intent::SpeechReadHere),
-        (KeyCode::Char('F'), Intent::SpeechToggleFollow),
         (KeyCode::Char('q'), Intent::Close),
         (KeyCode::Esc, Intent::Close),
     ];
@@ -1072,34 +1040,51 @@ mod tests {
     }
 
     #[test]
-    fn speech_navigation_actions_remap_and_shifted_letters_decode() {
-        for (name, intent) in [
-            ("speech_next_phrase", Intent::SpeechNextPhrase),
-            ("speech_previous_phrase", Intent::SpeechPreviousPhrase),
-            ("speech_next_paragraph", Intent::SpeechNextParagraph),
-            ("speech_previous_paragraph", Intent::SpeechPreviousParagraph),
-            ("speech_read_here", Intent::SpeechReadHere),
-            ("speech_toggle_follow", Intent::SpeechToggleFollow),
-        ] {
-            let (bindings, outcome) = resolve_with(&[(name, one("M"))]);
-            assert!(outcome.rejected.is_empty());
-            assert_eq!(dec(&bindings, KeyCode::Char('M')), Some(intent));
+    fn reading_keys_decode_every_action_and_leave_the_rest_global() {
+        use std::collections::HashSet;
+        let key = |code| KeyEvent::new(code, KeyModifiers::NONE);
+        let decoded: HashSet<ReadingAction> = [
+            KeyCode::Char(' '),
+            KeyCode::Left,
+            KeyCode::Right,
+            KeyCode::Up,
+            KeyCode::Down,
+            KeyCode::Char('='),
+            KeyCode::Char('-'),
+            KeyCode::Enter,
+            KeyCode::Char('f'),
+            KeyCode::Esc,
+        ]
+        .into_iter()
+        .filter_map(|c| decode_reading(key(c)))
+        .collect();
+        let all: HashSet<ReadingAction> = ReadingAction::ALL.iter().copied().collect();
+        assert_eq!(decoded, all, "every reading action has a fixed key");
+        assert_eq!(READING_KEYS.len(), ReadingAction::ALL.len());
+        // `+` (Shift+`=` on US and ABNT2) and `q` are accepted aliases.
+        assert_eq!(
+            decode_reading(KeyEvent::new(KeyCode::Char('+'), KeyModifiers::SHIFT)),
+            Some(ReadingAction::Faster)
+        );
+        assert_eq!(
+            decode_reading(key(KeyCode::Char('q'))),
+            Some(ReadingAction::Stop)
+        );
+        // Scrolling, search and the global toggle fall through to the registry.
+        for c in ['j', 'k', 't', 'n', '/', '?'] {
+            assert_eq!(decode_reading(key(KeyCode::Char(c))), None, "{c}");
         }
-        for (ch, intent) in [
-            ('j', Intent::SpeechNextParagraph),
-            ('k', Intent::SpeechPreviousParagraph),
-            ('f', Intent::SpeechToggleFollow),
-        ] {
-            assert_eq!(
-                map_key(KeyEvent::new(KeyCode::Char(ch), KeyModifiers::SHIFT)),
-                Some(intent)
-            );
-        }
+        assert_eq!(decode_reading(key(KeyCode::PageDown)), None);
+        // herdr owns Alt/Ctrl+arrows; a chord is never a reading key.
+        assert_eq!(
+            decode_reading(KeyEvent::new(KeyCode::Left, KeyModifiers::ALT)),
+            None
+        );
     }
 
     #[test]
     fn unmapped_keys_are_a_noop() {
-        assert_eq!(map_key(k(KeyCode::Char('M'))), None);
+        assert_eq!(map_key(k(KeyCode::Char('g'))), None);
         assert_eq!(map_key(k(KeyCode::Char('m'))), None);
         assert_eq!(map_key(k(KeyCode::F(1))), None);
         assert_eq!(map_key(k(KeyCode::Backspace)), None);
@@ -1898,8 +1883,8 @@ mod tests {
         assert_eq!(dec(&b, KeyCode::Char('f')), Some(Intent::OpenFinder));
         assert_eq!(
             dec(&b, KeyCode::Char('g')),
-            Some(Intent::SpeechReadHere),
-            "rejected custom claims leave the new default 'g' action untouched"
+            None,
+            "the clashed key 'g' decodes to nothing"
         );
     }
 
@@ -1914,8 +1899,8 @@ mod tests {
         );
         assert_eq!(
             dec(&b, KeyCode::Char('g')),
-            Some(Intent::SpeechReadHere),
-            "the whole entry is rejected, so 'g' keeps its default instead of rebinding"
+            None,
+            "the whole entry is rejected, so its parseable key 'g' is not bound"
         );
         assert_eq!(dec(&b, KeyCode::Char('r')), Some(Intent::Refresh));
     }
@@ -2003,6 +1988,28 @@ mod tests {
     /// `tests/docs_consistency.rs`, because it reads the `pub(crate)` [`registry`] / [`key_label`],
     /// which an integration test cannot see.
     const KEYS_DOC: &str = include_str!("../docs/keys.md");
+
+    #[test]
+    fn keys_doc_reading_mode_table_documents_every_reading_key() {
+        // Same drift guard as the `## Keys` table below, for the fixed reading-mode keys.
+        let start = KEYS_DOC
+            .find("## Reading mode")
+            .expect("docs/keys.md must carry a `## Reading mode` section");
+        let rest = &KEYS_DOC[start + "## Reading mode".len()..];
+        let section = &rest[..rest.find("\n## ").unwrap_or(rest.len())];
+        let key_cells: Vec<&str> = section
+            .lines()
+            .filter(|line| line.trim_start().starts_with('|'))
+            .filter_map(|line| line.split('|').nth(1))
+            .collect();
+        for (label, action) in READING_KEYS {
+            let needle = format!("`{label}`");
+            assert!(
+                key_cells.iter().any(|cell| cell.contains(&needle)),
+                "docs/keys.md `## Reading mode` documents no {needle} for {action:?}"
+            );
+        }
+    }
 
     #[test]
     fn keys_doc_table_documents_every_registry_action_ac21() {

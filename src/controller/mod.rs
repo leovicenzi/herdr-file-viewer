@@ -2379,24 +2379,6 @@ impl Controller {
             },
             Intent::ShowHelp => self.open_help(),
             Intent::ToggleSpeech => self.toggle_speech(),
-            Intent::SpeechReadHere => self.read_speech_here(),
-            Intent::SpeechToggleFollow => self.toggle_speech_follow(),
-            Intent::SpeechNextPhrase
-            | Intent::SpeechPreviousPhrase
-            | Intent::SpeechNextParagraph
-            | Intent::SpeechPreviousParagraph => self.skip_speech(intent),
-            Intent::StopSpeech => {
-                self.speech.stop();
-                Effects::redraw()
-            }
-            Intent::SpeechFaster => {
-                self.speech.adjust_speed(0.1);
-                Effects::redraw()
-            }
-            Intent::SpeechSlower => {
-                self.speech.adjust_speed(-0.1);
-                Effects::redraw()
-            }
             Intent::Close => self.close_or_unzoom(),
         }
     }

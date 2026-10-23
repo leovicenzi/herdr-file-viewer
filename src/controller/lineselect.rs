@@ -576,7 +576,7 @@ impl Controller {
         let shift = key.modifiers.contains(KeyModifiers::SHIFT);
 
         // Like the local annotation/yank controls, this is fixed inside L mode.
-        // In normal browsing the registry's speech_read_here action is remappable.
+        // In reading mode, Enter does the same from a mouse selection or search match.
         if key.code == KeyCode::Char('g') && key.modifiers == KeyModifiers::NONE {
             return self.read_speech_here();
         }

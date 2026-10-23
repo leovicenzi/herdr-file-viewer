@@ -1,5 +1,6 @@
 //! Read-aloud orchestration. Coordinates always refer to the settled active render.
 use super::*;
+use crate::intent::ReadingAction;
 use crate::speech::{ReadAloud, SpeechBackend, TextMode};
 
 impl Controller {
@@ -9,6 +10,36 @@ impl Controller {
 
     pub fn speech(&self) -> &ReadAloud {
         &self.speech
+    }
+
+    /// Reading mode lasts from the first `t` until Esc stops it, including a finished or failed
+    /// session (so ← can revisit the end and Esc dismisses the error).
+    pub fn reading_mode_active(&self) -> bool {
+        self.speech.in_session()
+    }
+
+    pub fn handle_reading(&mut self, action: ReadingAction) -> Effects {
+        match action {
+            ReadingAction::TogglePause => self.toggle_speech(),
+            ReadingAction::Stop => {
+                self.speech.stop();
+                Effects::redraw()
+            }
+            ReadingAction::Faster => {
+                self.speech.adjust_speed(0.1);
+                Effects::redraw()
+            }
+            ReadingAction::Slower => {
+                self.speech.adjust_speed(-0.1);
+                Effects::redraw()
+            }
+            ReadingAction::ReadHere => self.read_speech_here(),
+            ReadingAction::ToggleFollow => self.toggle_speech_follow(),
+            ReadingAction::NextPhrase
+            | ReadingAction::PreviousPhrase
+            | ReadingAction::NextParagraph
+            | ReadingAction::PreviousParagraph => self.skip_speech(action),
+        }
     }
 
     fn speech_top_line(&self) -> usize {
@@ -124,12 +155,12 @@ impl Controller {
         }
     }
 
-    pub(super) fn skip_speech(&mut self, intent: Intent) -> Effects {
-        let moved = match intent {
-            Intent::SpeechNextPhrase => self.speech.next_phrase(),
-            Intent::SpeechPreviousPhrase => self.speech.previous_phrase(),
-            Intent::SpeechNextParagraph => self.speech.next_paragraph(),
-            Intent::SpeechPreviousParagraph => self.speech.previous_paragraph(),
+    fn skip_speech(&mut self, action: ReadingAction) -> Effects {
+        let moved = match action {
+            ReadingAction::NextPhrase => self.speech.next_phrase(),
+            ReadingAction::PreviousPhrase => self.speech.previous_phrase(),
+            ReadingAction::NextParagraph => self.speech.next_paragraph(),
+            ReadingAction::PreviousParagraph => self.speech.previous_paragraph(),
             _ => false,
         };
         if moved {
@@ -137,9 +168,9 @@ impl Controller {
         } else {
             self.action_notice = Some(
                 if self.speech.current_chunk().is_none() {
-                    "Start read-aloud with t or g first"
+                    "Start read-aloud with t first"
                 } else {
-                    "End of indexed preview; scroll and use g to read elsewhere"
+                    "End of indexed preview; scroll and press Enter to read elsewhere"
                 }
                 .into(),
             );

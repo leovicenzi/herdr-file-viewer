@@ -90,7 +90,7 @@ are cached by Hugging Face.
 On Linux, `HERDR_TTS_DEVICE` (in the helper's environment) overrides the PyTorch
 device, e.g. `cpu` to leave a hybrid laptop's discrete GPU asleep. A warm CUDA
 context keeps the GPU powered while the helper runs, which is from the first `t` until
-the viewer exits (`T` stops playback but keeps the model warm).
+the viewer exits (`Esc` stops playback but keeps the model warm).
 
 The bundled runtime supports **macOS arm64 and Linux x86_64**. Other platforms still
 build and browse normally, and can supply another backend using `tts_command`. Missing setup,
@@ -101,23 +101,32 @@ than terminating the viewer. The helper starts only on the first explicit read.
 
 | Key | Action |
 | --- | --- |
-| `t` | Read from the **phrase at the top visible line** of the settled active preview; while reading, pause/resume |
-| `T` (Shift+`t`) | Stop and clear the highlight; the next `t` starts at the then-visible line |
-| `+` / `-` | Adjust speed by 0.1×, from 0.5× to 2.5×, without changing pitch |
-| `(` / `)` | Previous / next speech phrase. Previous restarts the current phrase after two audible seconds; otherwise it goes back one |
-| `K` / `J` | Previous / next paragraph/block (Shift+`k` / Shift+`j`). No wrap; previous at the first block restarts it |
-| `g` | Read from the phrase containing the selection, visible current search match, or viewport top, in that priority order |
-| `F` | Toggle follow playback (Shift+`f`); on by default, with its state shown in the status strip |
+`t` is the only global read-aloud key (remappable as `toggle_speech`). It reads from the
+**phrase at the top visible line** of the settled active preview and enters **reading
+mode**; pressed again, it pauses/resumes. Reading mode lasts until `Esc`, including after
+the document finishes, and owns these fixed, media-player keys:
+
+| Key | Action |
+| --- | --- |
+| `Space` | Pause / resume |
+| `←` / `→` | Previous / next speech phrase. Previous restarts the current phrase after two audible seconds; otherwise it goes back one |
+| `↑` / `↓` | Previous / next paragraph/block. No wrap; previous at the first block restarts it |
+| `=` (or `+`) / `-` | Adjust speed by 0.1×, from 0.5× to 2.5×, without changing pitch |
+| `Enter` | Read from the phrase containing the selection, visible current search match, or viewport top, in that priority order |
+| `f` | Toggle follow playback; on by default, with its state shown in the status strip |
+| `Esc` / `q` | Stop, clear the highlight, and leave reading mode; the next `t` starts at the then-visible line |
+
+Every other key keeps its global meaning, so `j`/`k`, `PgUp`/`PgDn`, `/` search, and `n`/`N`
+browse while listening. Reading-mode keys need no Shift on US or ABNT2 layouts.
 
 The status strip reports idle/loading/reading/paused/finished, the phrase's language, speed, phrase position, and follow state. With a
 backend configured its row stays reserved even while idle, so starting speech or
-changing speed cannot resize/reflow the preview and invalidate its coordinates. A shaded
-phrase gives context; the current word is yellow/bold. With follow on, the active
-preview scrolls when the spoken line leaves the viewport. As with other global
-keys, close a finder, search prompt, or help before using these controls.
-Line-select mode keeps its fixed `J`/`K` extension controls and adds a fixed local
-`g` confirm to read from the selection; other speech controls remain modal-gated.
-`Space` retains its existing page-down behavior, not pause.
+changing speed cannot resize/reflow the preview and invalidate its coordinates. While reading
+it also lists the reading-mode keys. A shaded phrase gives context; the current word is
+yellow/bold. With follow on, the active preview scrolls when the spoken line leaves the
+viewport. A finder, search prompt, help, line-select, or annotation modal owns its keys while
+open; close it to use the reading-mode keys again. Line-select mode keeps its fixed `J`/`K`
+extension controls and a fixed local `g` confirm to read from the selection.
 
 Speech follows the sanitized renderer output, including rendered Markdown and
 code. Syntax-renderer line-number gutters and decorative-only lines are skipped.
@@ -141,7 +150,7 @@ split at commas. These bounded phrase seams can still introduce a pause.
 Text indexing is bounded to 4 MiB / 32768 phrases of the settled preview. Audio
 requests use rolling windows of at most 256 KiB / 2048 phrases and automatically
 advance to the next window. Only the current/prefetched phrases are synthesized,
-not the entire index. For larger configured previews, `g` outside the indexed
+not the entire index. For larger configured previews, `Enter` outside the indexed
 prefix opens a new local index there; backward navigation is then limited to
 that index. Existing renderer preview/truncation limits still apply.
 
@@ -157,7 +166,7 @@ the destination phrase without starting audio. While playing, a seek clears the
 old audio and starts the destination; cached destinations are faster, but neither
 cache hits nor new synthesis promise gapless/instant seeking. Each seek has a new
 playback ID, so queued progress from the old position cannot repaint the target.
-At the end, the text index remains available for Previous; `T` clears it.
+At the end, the text index remains available for Previous; `Esc` clears it.
 
 The index normally includes text before the initial starting point, so Previous
 can go back before where you first pressed `t`. A phrase is a sentence or a bounded
@@ -169,20 +178,20 @@ this is not a Markdown AST/source-position guarantee.
 
 To choose somewhere else while listening:
 
-1. Press `F` to turn follow **off**, so playback does not pull your viewport back.
-2. Scroll/search to the passage. Either select text with the mouse, use the current
+1. Press `f` to turn follow **off**, so playback does not pull your viewport back.
+2. Scroll (`j`/`k`, `PgUp`/`PgDn`) or search (`/`, `n`/`N`) to the passage. Either select text with the mouse, use the current
    visible search result, or leave the desired line at the top of the viewport.
    For keyboard line selection, `Tab` to content and press `L`, then move the marker.
    (`L` switches transformed views to source, which stops existing playback.)
-3. Press `g`. Reading begins at the **containing phrase**, which may repeat text
+3. Press `Enter` (or `g` in line-select mode). Reading begins at the **containing phrase**, which may repeat text
    before your caret; a selection is a starting anchor, not a playback end boundary.
    The selection is consumed so it does not obscure the spoken highlight.
-4. Press `F` again if you want automatic following back on. It immediately reveals
+4. Press `f` again if you want automatic following back on. It immediately reveals
    the current phrase, even when paused. Follow is temporarily suppressed while
    a modal or drag owns the browsing cursor.
 
-`n`/`N`, `[`/`]`, and normal arrows keep their existing search/file/scroll meanings.
-The new global actions are remappable; line-select's local controls remain fixed.
+`n`/`N`, `[`/`]`, and `j`/`k` keep their search/file/scroll meanings while reading; the arrows
+belong to reading mode until `Esc`.
 
 ## Timing and performance
 
@@ -219,10 +228,8 @@ tts_speed = 1.0
 # tts_command = '/absolute/plugin/.venv-tts/bin/python -u /absolute/plugin/scripts/read_aloud.py'
 ```
 
-`? → Settings` shows both values. `[keys]` supports `toggle_speech`, `stop_speech`,
-`speech_faster`, `speech_slower`, `speech_previous_phrase`, `speech_next_phrase`,
-`speech_previous_paragraph`, `speech_next_paragraph`, `speech_read_here`, and
-`speech_toggle_follow` like other actions.
+`? → Settings` shows both values. `[keys]` remaps `toggle_speech` like other actions; the
+reading-mode keys are fixed.
 
 Set `HERDR_FILE_VIEWER_NO_TTS=1` to disable the optional backend and its idle
 status row (also used by non-audio PTY tests, independently of local runtime setup).

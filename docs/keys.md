@@ -27,16 +27,7 @@ is additive and on by default.
 | `D` (Shift+`d`) | In Diff/FullDiff views, cycle diff presentation through `delta` unified, side-by-side, and plain, unstyled `git diff` text |
 | `v` | Cycle the content view mode |
 | `e` | Open the selected file in `$EDITOR` (see [Opening in an editor](#opening-in-an-editor)) |
-| `t` | **Read aloud** from the phrase at the top visible line of the active preview; press again to pause/resume. Local Kokoro (MLX on Apple Silicon, PyTorch/CUDA on Linux) with word highlighting; see [setup](read-aloud.md) |
-| `T` (Shift+`t`) | Stop read-aloud and clear its highlight |
-| `+` | Increase read-aloud speed by 0.1× (up to 2.5×), preserving pitch |
-| `-` | Decrease read-aloud speed by 0.1× (down to 0.5×), preserving pitch |
-| `(` | Previous speech phrase; after two audible seconds, restart the current phrase instead |
-| `)` | Next speech phrase; pause state and speed are preserved |
-| `K` (Shift+`k`) | Previous speech paragraph/block (no wrap); in line-select mode it still extends the selection upward |
-| `J` (Shift+`j`) | Next speech paragraph/block (no wrap); in line-select mode it still extends the selection downward |
-| `g` | Read from the phrase containing the selected passage, visible current search match, or top visible line (in that order); also a fixed local confirm in line-select mode. Continues beyond the selection, preserving pause/speed |
-| `F` (Shift+`f`) | Toggle **follow playback** (on by default). Off lets you browse/search/select independently; turning on brings the spoken phrase into view |
+| `t` | **Read aloud** from the phrase at the top visible line of the active preview and enter [reading mode](#reading-mode); press again to pause/resume. Local Kokoro (MLX on Apple Silicon, PyTorch/CUDA on Linux) with word highlighting; see [setup](read-aloud.md) |
 | `O` (Shift+`o`) | **Open with default app**: hand the selected file or directory to the OS default application (e.g. an image opens in the system viewer). Read-only hand-off; non-blocking (the viewer keeps running) |
 | `R` (Shift+`r`) | **Reveal in file manager**: open the OS file manager (Finder / Explorer / a Linux file manager) with the selected entry highlighted where supported, so you can drag it out (e.g. into Slack). Read-only hand-off |
 | `f` | **Go to file**: open a fuzzy finder over every file in the tree; type to filter, `↑` / `↓` move, `Enter` opens the selected file and focuses its active preview, `Esc` cancels (`←` / `→` scroll long paths) |
@@ -83,7 +74,7 @@ place when it was edited, its git status changed, or (for a diff) HEAD moved.
 
 Character keys with a control modifier are normally inert, so terminal chords such as `Ctrl+C` do
 not trigger a viewer action; `Shift` is permitted for keys such as `<`, `>`, `{`, and `}` (and `a`/`A`,
-`y`/`Y`, `t`/`T`, `+`, `(`/`)`, `F`, `D`, `W`, `N`, `O`, `R`, `Z`, `?`, `H`/`L`, `J`/`K` for speech or line-select mode, and `d`/`D` in the
+`y`/`Y`, `D`, `W`, `N`, `O`, `R`, `Z`, `?`, `H`/`L`, `J`/`K` in line-select mode, `+` in reading mode, and `d`/`D` in the
 annotation overview).
 
 **On Windows only**, `Ctrl+Alt`+character (with optional `Shift`) is treated as typing (AltGr), not
@@ -133,6 +124,26 @@ Selection also works in views wrapped with `w`; the viewer maps each click throu
 wrapping. Because selection maps only to source text, entering line-select from rendered markdown or
 a diff switches the file to the line-numbered content view. With the **tree** focused, `L` scrolls
 the tree horizontally instead. The focused pane determines the action.
+
+## Reading mode
+
+From the first `t` until it stops, read-aloud owns a few fixed, media-player keys. They take
+precedence over the global keys of the same name; every other key keeps working, so `j`/`k`,
+`PgUp`/`PgDn`, search, and `t` (pause/resume) are unchanged.
+
+| Key | Action |
+| --- | --- |
+| `Space` | Pause / resume |
+| `←` / `→` | Previous / next phrase. Previous restarts the current phrase after two audible seconds |
+| `↑` / `↓` | Previous / next paragraph or block (no wrap) |
+| `=` (or `+`) / `-` | Faster / slower by 0.1×, from 0.5× to 2.5×, preserving pitch |
+| `Enter` | Read from the phrase containing the selection, visible current search match, or top visible line (in that order) |
+| `f` | Toggle **follow playback** (on by default); off lets you browse and pick a new spot |
+| `Esc` / `q` | Stop reading, clear the highlight, and leave reading mode |
+
+While reading, `←`/`→`, `↑`/`↓`, `Space`, `Enter`, `f`, and `q`/`Esc` therefore do not scroll,
+page, open, find, or quit; stop with `Esc` first. These keys are fixed, not remappable. Seeks keep
+the pause state and speed. In line-select mode, its local `g` still reads from the selection.
 
 ## Mouse
 
