@@ -19,6 +19,7 @@ All notable changes to this project are documented here. The format is based on
 - Read-aloud controls are now a media-player **reading mode**: `t` starts reading (and still pauses/resumes), then `Space` pauses, `←`/`→` move by phrase, `↑`/`↓` by paragraph, `=`/`-` change speed, `Enter` reads from the selection or search match, `f` toggles follow, and `Esc` stops. The global `T`, `+`, `-`, `(`, `)`, `J`, `K`, `g`, and `F` read-aloud keys and their `[keys]` names are gone, which frees those keys again. → [keys](docs/keys.md#reading-mode)
 
 ### Fixed
+- On macOS arm64, read-aloud limits MLX's reusable GPU allocation cache to 64 MiB and clears unused cached buffers after each synthesis job, including cancellation and errors. The model stays loaded; this is not a cap on total process memory. → [read-aloud](docs/read-aloud.md#memory-use)
 - Installing this fork no longer downloads upstream's same-version prebuilt binary, which lacks read-aloud. The installer looks for releases in the fork, finds none, and builds from source. → [read-aloud](docs/read-aloud.md)
 - Read-aloud word highlighting no longer stalls until the end of each phrase on audio stacks that queue more than one buffer ahead of the DAC (ALSA/PipeWire). `scripts/setup-tts.sh` no longer aborts on a broken line continuation.
 - A repository can no longer run a program through a submodule `diff.external` (or, on older git, a submodule textconv) while a diff is shown. Nested submodule diffs stay a one-line gitlink summary. → [security](SECURITY.md)
