@@ -97,6 +97,19 @@ build and browse normally, and can supply another backend using `tts_command`. M
 missing output devices, and synthesis failures produce an in-app notice rather
 than terminating the viewer. The helper starts only on the first explicit read.
 
+## Memory use
+
+On macOS arm64, each helper limits MLX's reusable GPU allocation cache to **64 MiB**
+(in `scripts/read_aloud.py`). It also clears unused cached GPU buffers when a synthesis
+job returns, including after cancellation or an error. The model and live pipeline
+arrays stay loaded for subsequent playback.
+
+This is not a 64 MiB limit on total process memory: model weights, live intermediate
+tensors, audio, and Python libraries use additional memory. Synthesis can still have
+higher temporary peaks. Each viewer runs its own helper, so multiple viewers have
+independent models and caches. This change does not alter the PyTorch backend.
+Restart an already-running helper/viewer after updating to use the new policy.
+
 ## Controls
 
 | Key | Action |

@@ -15,6 +15,46 @@ def single(pipeline):
 
 
 class ReadAloudTests(unittest.TestCase):
+    def test_mlx_cache_is_bounded_before_model_load(self):
+        from unittest.mock import Mock
+        mx, loader = Mock(), Mock()
+        modules = {'mlx': types.ModuleType('mlx'), 'mlx.core': mx,
+                   'mlx_audio': types.ModuleType('mlx_audio'),
+                   'mlx_audio.tts': types.ModuleType('mlx_audio.tts'),
+                   'mlx_audio.tts.utils': types.SimpleNamespace(load_model=loader)}
+        loader.side_effect = lambda model: mx.set_cache_limit.assert_called_once_with(64 * 1024 * 1024)
+        with patch.dict('sys.modules', modules), patch.object(tts, 'use_mlx', return_value=True):
+            tts.load_model()
+        loader.assert_called_once_with(tts.MODEL)
+
+    def test_synthesis_releases_cache_on_success_and_failure(self):
+        from unittest.mock import Mock
+        for fail in (False, True):
+            control = tts.Control()
+            control.jobs.put({'id': control.ident})
+            voices = Mock()
+            def generate(*args):
+                control.closed.set()
+                if fail:
+                    raise RuntimeError('test failure')
+            with patch.object(tts, 'Voices', return_value=voices), patch.object(tts, 'generate_job', side_effect=generate):
+                tts.synthesize(control)
+            voices.release_cache.assert_called_once_with()
+
+    def test_cache_release_preserves_warm_model_and_skips_other_backends(self):
+        from unittest.mock import Mock
+        voices, mx = tts.Voices(), Mock()
+        with patch.dict('sys.modules', {'mlx': types.ModuleType('mlx'), 'mlx.core': mx}), patch.object(tts, 'use_mlx', return_value=True):
+            voices.release_cache()
+            mx.clear_cache.assert_not_called()
+            voices.model = model = object()
+            voices.release_cache()
+            mx.clear_cache.assert_called_once_with()
+            self.assertIs(voices.model, model)
+        with patch.object(tts, 'use_mlx', return_value=False):
+            voices.release_cache()
+        mx.clear_cache.assert_called_once_with()
+
     def test_utf8_word_mapping_and_repeated_words(self):
         tokens = [types.SimpleNamespace(text=text, start_ts=i, end_ts=i+0.5)
                   for i, text in enumerate(["Olá", "go", "go", "normalized-missing"])]

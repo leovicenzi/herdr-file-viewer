@@ -33,6 +33,8 @@ MAX_REQUEST = 2 * 1024 * 1024
 MAX_TEXT_BYTES = 256 * 1024
 MAX_CACHE_BYTES = 16 * 1024 * 1024
 MAX_CACHE_PHRASES = 16
+# MLX otherwise allows each helper to retain nearly a machine's worth of GPU buffers.
+MLX_CACHE_BYTES = 64 * 1024 * 1024
 # Buffers queued ahead of the DAC: ~1 on CoreAudio, 2+ on ALSA/PipeWire at 20 ms blocks.
 MAX_QUEUED_BUFFERS = 32
 
@@ -224,7 +226,9 @@ def voice_for(lang):
 def load_model():
     """One model for every language; the per-language pipelines only add a phonemizer."""
     if use_mlx():
+        import mlx.core as mx
         from mlx_audio.tts.utils import load_model as load_mlx
+        mx.set_cache_limit(MLX_CACHE_BYTES)
         return load_mlx(MODEL)
     import torch
     from kokoro import KModel
@@ -260,6 +264,12 @@ class Voices:
         if lang not in self.pipelines:
             self.pipelines[lang] = load_pipeline(lang, self.model)
         return self.pipelines[lang]
+
+    def release_cache(self):
+        """Drop unused GPU buffers, not the warm model or live pipeline arrays."""
+        if use_mlx() and self.model is not None:
+            import mlx.core as mx
+            mx.clear_cache()
 
 
 def duration_marks(text, phonemes, durations, vocab, g2p, lang="en"):
@@ -382,6 +392,9 @@ def synthesize(control):
                 generate_job(control, job, voices, np)
         except Exception as exc:
             control.publish(Generated(ident, -1, error=f"{type(exc).__name__}: {exc}"))
+        finally:
+            # Also release scratch buffers after canceled or failed synthesis.
+            voices.release_cache()
 
 
 class Player:
