@@ -35,6 +35,8 @@ MAX_CACHE_BYTES = 16 * 1024 * 1024
 MAX_CACHE_PHRASES = 16
 # MLX otherwise allows each helper to retain nearly a machine's worth of GPU buffers.
 MLX_CACHE_BYTES = 64 * 1024 * 1024
+# PyTorch's fixed-size CUDA segments fragment across phrase lengths; growable ones reuse space.
+CUDA_ALLOC_CONF = "expandable_segments:True"
 # Buffers queued ahead of the DAC: ~1 on CoreAudio, 2+ on ALSA/PipeWire at 20 ms blocks.
 MAX_QUEUED_BUFFERS = 32
 
@@ -230,6 +232,8 @@ def load_model():
         from mlx_audio.tts.utils import load_model as load_mlx
         mx.set_cache_limit(MLX_CACHE_BYTES)
         return load_mlx(MODEL)
+    # Read once when CUDA initializes; an explicit user setting wins.
+    os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", CUDA_ALLOC_CONF)
     import torch
     from kokoro import KModel
     return KModel(repo_id=TORCH_MODEL).to(torch_device(torch)).eval()
@@ -270,6 +274,11 @@ class Voices:
         if use_mlx() and self.model is not None:
             import mlx.core as mx
             mx.clear_cache()
+        elif self.model is not None and "torch" in sys.modules:
+            torch = sys.modules["torch"]
+            # is_initialized: a CPU helper must not create a CUDA context just to free nothing.
+            if torch.cuda.is_available() and torch.cuda.is_initialized():
+                torch.cuda.empty_cache()
 
 
 def duration_marks(text, phonemes, durations, vocab, g2p, lang="en"):
