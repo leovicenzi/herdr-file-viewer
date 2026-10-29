@@ -115,6 +115,13 @@ None of this is a limit on total process memory: model weights, live intermediat
 tensors, audio, and Python libraries use additional memory (about 2 GB of system RAM
 for a PyTorch helper). Synthesis can still have higher temporary peaks. Each viewer runs
 its own helper, so multiple viewers have independent models and caches.
+
+A helper that has been neither loading nor playing for **5 minutes** is stopped, which
+frees all of its memory. That covers reading that finished, was stopped, or stayed
+paused. Nothing changes on screen: a paused session resumes from the start of its
+current phrase, and seeking still works. The next read starts a new helper, which
+first reloads the model (a few seconds).
+
 Restart an already-running helper/viewer after updating to use the new policy.
 
 ## Controls
