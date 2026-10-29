@@ -20,6 +20,7 @@ use std::{
 struct Fake {
     commands: Arc<Mutex<Vec<SpeechCommand>>>,
     events: Arc<Mutex<Vec<SpeechEvent>>>,
+    releases: Arc<Mutex<usize>>,
 }
 impl SpeechBackend for Fake {
     fn send(&mut self, command: SpeechCommand) -> io::Result<()> {
@@ -28,6 +29,9 @@ impl SpeechBackend for Fake {
     }
     fn poll(&mut self) -> Vec<SpeechEvent> {
         std::mem::take(&mut *self.events.lock().unwrap())
+    }
+    fn release(&mut self) {
+        *self.releases.lock().unwrap() += 1;
     }
 }
 fn phrase() -> SpeechChunk {
@@ -145,6 +149,82 @@ fn pause_resume_rate_and_stop_are_explicit_commands() {
             .any(|c| matches!(c, SpeechCommand::Speed { speed, .. } if *speed == 1.1))
     );
     assert!(matches!(commands.last(), Some(SpeechCommand::Stop { .. })));
+}
+
+#[test]
+fn idle_helper_is_released_only_after_playback_stops_for_the_idle_period() {
+    let fake = Fake::default();
+    let mut state = ReadAloud::default();
+    state.set_backend(Box::new(fake.clone()), 1.0);
+    let releases = || *fake.releases.lock().unwrap();
+    // Instants are passed in, so no test waits on a clock.
+    let start = std::time::Instant::now();
+    assert!(
+        !state.release_if_idle(start + HELPER_IDLE * 2),
+        "no helper yet"
+    );
+    state.start(vec![phrase()]);
+    assert!(
+        !state.release_if_idle(start + HELPER_IDLE * 3),
+        "loading is busy, however long it takes"
+    );
+    let id = session(&fake);
+    fake.events
+        .lock()
+        .unwrap()
+        .push(event(id, "done", None, None));
+    state.poll();
+    assert_eq!(state.phase, Phase::Idle);
+    let finished = start + HELPER_IDLE * 3;
+    assert!(!state.release_if_idle(finished + HELPER_IDLE / 2));
+    assert!(state.release_if_idle(finished + HELPER_IDLE));
+    assert!(!state.release_if_idle(finished + HELPER_IDLE * 2), "once");
+    assert_eq!(releases(), 1);
+    // Revisiting finished audio restarts a helper with a Speak.
+    let sent = fake.commands.lock().unwrap().len();
+    assert!(state.previous_phrase());
+    let commands = fake.commands.lock().unwrap();
+    assert_eq!(commands.len(), sent + 1);
+    assert!(matches!(
+        commands[sent],
+        SpeechCommand::Speak { offset: 0, .. }
+    ));
+}
+
+#[test]
+fn paused_session_survives_release_and_resumes_with_a_fresh_speak() {
+    let fake = Fake::default();
+    let mut state = ReadAloud::default();
+    state.set_backend(Box::new(fake.clone()), 1.0);
+    let chunks = vec![phrase(), phrase(), phrase()];
+    state.start_at(chunks, 1);
+    state.toggle_pause();
+    assert_eq!(state.phase, Phase::Paused);
+    let paused_at = std::time::Instant::now();
+    assert!(state.release_if_idle(paused_at + HELPER_IDLE));
+    let sent = fake.commands.lock().unwrap().len();
+    // Speed changes reach no helper; the next Speak carries the speed instead.
+    state.adjust_speed(0.2);
+    assert_eq!(fake.commands.lock().unwrap().len(), sent);
+    state.toggle_pause();
+    assert_eq!(state.phase, Phase::Loading);
+    let commands = fake.commands.lock().unwrap().clone();
+    assert_eq!(commands.len(), sent + 1);
+    assert!(matches!(
+        commands[sent],
+        SpeechCommand::Speak {
+            offset: 1,
+            paused: false,
+            speed,
+            ..
+        } if (speed - 1.2).abs() < 1e-9
+    ));
+    // Stopping a released session never starts a helper just to stop it.
+    state.toggle_pause();
+    assert!(state.release_if_idle(std::time::Instant::now() + HELPER_IDLE));
+    state.stop();
+    assert_eq!(fake.commands.lock().unwrap().len(), sent + 2);
+    assert_eq!(*fake.releases.lock().unwrap(), 2);
 }
 
 #[test]

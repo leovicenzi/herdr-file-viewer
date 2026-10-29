@@ -8,6 +8,7 @@ use std::io::{self, BufRead, Read, Write};
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex, mpsc};
+use std::time::{Duration, Instant};
 
 mod chunking;
 mod language;
@@ -21,6 +22,9 @@ pub use language::{BlockKind, SpeechLang};
 
 pub const MIN_SPEED: f64 = 0.5;
 pub const MAX_SPEED: f64 = 2.5;
+/// A helper holds its model in RAM (and VRAM on CUDA) while it lives, so one that has not
+/// synthesized or played for this long is stopped; the next read starts a fresh one.
+pub const HELPER_IDLE: Duration = Duration::from_secs(5 * 60);
 
 pub fn clamp_speed(speed: f64) -> f64 {
     if speed.is_finite() {
@@ -81,6 +85,8 @@ pub struct SpeechEvent {
 pub trait SpeechBackend {
     fn send(&mut self, command: SpeechCommand) -> io::Result<()>;
     fn poll(&mut self) -> Vec<SpeechEvent>;
+    /// Free the helper and everything it holds; the next `send` starts a fresh one.
+    fn release(&mut self) {}
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -106,6 +112,10 @@ pub struct ReadAloud {
     window_end: usize,
     elapsed: f64,
     pub follow: bool,
+    /// Last moment the helper was loading or playing, or was sent a command.
+    busy_at: Instant,
+    /// No helper holds this session's state: only a `Speak` can reach a fresh one.
+    released: bool,
 }
 
 impl Default for ReadAloud {
@@ -124,6 +134,8 @@ impl Default for ReadAloud {
             window_end: 0,
             elapsed: 0.0,
             follow: true,
+            busy_at: Instant::now(),
+            released: true,
         }
     }
 }
@@ -136,16 +148,25 @@ impl ReadAloud {
     }
 
     fn send(&mut self, command: SpeechCommand) {
+        // A fresh helper has never seen this id: starting one just to pause, retime, or
+        // stop nothing would reload the model for no audio.
+        if self.released && !matches!(command, SpeechCommand::Speak { .. }) {
+            return;
+        }
+        self.busy_at = Instant::now();
         let result = match &mut self.backend {
             Some(backend) => backend.send(command),
             None => Err(io::Error::other(
                 "Read-aloud is not configured; see docs/read-aloud.md",
             )),
         };
-        if let Err(err) = result {
-            self.phase = Phase::Failed;
-            self.highlight = None;
-            self.error = Some(err.to_string());
+        match result {
+            Ok(()) => self.released = false,
+            Err(err) => {
+                self.phase = Phase::Failed;
+                self.highlight = None;
+                self.error = Some(err.to_string());
+            }
         }
     }
 
@@ -282,6 +303,11 @@ impl ReadAloud {
             return;
         }
         let paused = self.phase != Phase::Paused;
+        if !paused && self.released {
+            // The idle helper was stopped while paused: resume from the current phrase.
+            self.play_from(self.current, false);
+            return;
+        }
         self.phase = if paused {
             Phase::Paused
         } else {
@@ -442,7 +468,25 @@ impl ReadAloud {
             }
             changed = true;
         }
+        self.release_if_idle(Instant::now());
         changed
+    }
+
+    /// Stops the helper once it has been neither loading nor playing for [`HELPER_IDLE`].
+    /// A paused or finished session survives it: the next seek or resume restarts the helper.
+    pub fn release_if_idle(&mut self, now: Instant) -> bool {
+        if matches!(self.phase, Phase::Loading | Phase::Speaking) {
+            self.busy_at = now;
+            return false;
+        }
+        if self.released || now.saturating_duration_since(self.busy_at) < HELPER_IDLE {
+            return false;
+        }
+        if let Some(backend) = &mut self.backend {
+            backend.release();
+        }
+        self.released = true;
+        true
     }
 }
 
@@ -617,15 +661,20 @@ impl SpeechBackend for CommandSpeech {
             .map(|rx| rx.try_iter().take(256).collect())
             .unwrap_or_default()
     }
-}
-
-impl Drop for CommandSpeech {
-    fn drop(&mut self) {
+    fn release(&mut self) {
+        // Dropping the receiver first discards the reader's "helper exited" error.
+        self.rx = None;
         self.tx = None;
         if let Some(mut child) = self.child.take() {
             let _ = child.kill();
             let _ = child.wait();
         }
+    }
+}
+
+impl Drop for CommandSpeech {
+    fn drop(&mut self) {
+        self.release();
     }
 }
 

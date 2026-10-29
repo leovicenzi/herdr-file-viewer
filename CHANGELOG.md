@@ -20,6 +20,7 @@ All notable changes to this project are documented here. The format is based on
 
 ### Fixed
 - On macOS arm64, read-aloud limits MLX's reusable GPU allocation cache to 64 MiB and clears unused cached buffers after each synthesis job, including cancellation and errors. The model stays loaded; this is not a cap on total process memory. → [read-aloud](docs/read-aloud.md#memory-use)
+- Read-aloud stops its helper after 5 minutes without loading or playing, so an idle viewer no longer holds about 2 GB of RAM (plus GPU memory on CUDA). A paused session resumes from its current phrase; the next read reloads the model first. → [read-aloud](docs/read-aloud.md#memory-use)
 - On Linux with CUDA, read-aloud no longer lets PyTorch's GPU cache grow to about 2.6 times the memory synthesis uses. The helper turns on `expandable_segments` (unless `PYTORCH_CUDA_ALLOC_CONF` is already set) and empties the CUDA cache after each synthesis job, so a helper peaks around 0.9 GB of GPU memory instead of 1.45 GB. → [read-aloud](docs/read-aloud.md#memory-use)
 - Installing this fork no longer downloads upstream's same-version prebuilt binary, which lacks read-aloud. The installer looks for releases in the fork, finds none, and builds from source. → [read-aloud](docs/read-aloud.md)
 - Read-aloud word highlighting no longer stalls until the end of each phrase on audio stacks that queue more than one buffer ahead of the DAC (ALSA/PipeWire). `scripts/setup-tts.sh` no longer aborts on a broken line continuation.
