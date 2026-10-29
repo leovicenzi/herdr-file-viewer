@@ -104,10 +104,17 @@ On macOS arm64, each helper limits MLX's reusable GPU allocation cache to **64 M
 job returns, including after cancellation or an error. The model and live pipeline
 arrays stay loaded for subsequent playback.
 
-This is not a 64 MiB limit on total process memory: model weights, live intermediate
-tensors, audio, and Python libraries use additional memory. Synthesis can still have
-higher temporary peaks. Each viewer runs its own helper, so multiple viewers have
-independent models and caches. This change does not alter the PyTorch backend.
+On Linux with CUDA, the helper does the same with PyTorch's allocator. It turns on
+`expandable_segments` (unless you set `PYTORCH_CUDA_ALLOC_CONF` yourself), so phrases of
+different lengths reuse one growable region instead of leaving behind differently sized
+blocks. It also empties the CUDA cache when a synthesis job returns. Measured on Kokoro,
+the GPU memory a helper holds peaks around 0.9 GB instead of 1.45 GB and falls back to
+about 0.6 GB between reads. A CPU-only helper is unaffected.
+
+None of this is a limit on total process memory: model weights, live intermediate
+tensors, audio, and Python libraries use additional memory (about 2 GB of system RAM
+for a PyTorch helper). Synthesis can still have higher temporary peaks. Each viewer runs
+its own helper, so multiple viewers have independent models and caches.
 Restart an already-running helper/viewer after updating to use the new policy.
 
 ## Controls
