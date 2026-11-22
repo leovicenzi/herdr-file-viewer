@@ -55,6 +55,33 @@ class ReadAloudTests(unittest.TestCase):
             voices.release_cache()
         mx.clear_cache.assert_called_once_with()
 
+    def test_cuda_cache_release_only_touches_an_initialized_device(self):
+        from unittest.mock import Mock
+        voices, torch = tts.Voices(), Mock()
+        with patch.dict('sys.modules', {'torch': torch}), patch.object(tts, 'use_mlx', return_value=False):
+            voices.release_cache()  # no model yet
+            torch.cuda.is_initialized.return_value = False
+            voices.model = model = object()
+            voices.release_cache()  # CPU helper: no CUDA context
+            torch.cuda.empty_cache.assert_not_called()
+            torch.cuda.is_initialized.return_value = True
+            voices.release_cache()
+            torch.cuda.empty_cache.assert_called_once_with()
+            self.assertIs(voices.model, model)
+
+    def test_cuda_allocator_uses_growable_segments_unless_user_set(self):
+        from unittest.mock import Mock
+        for preset, expected in ((None, tts.CUDA_ALLOC_CONF), ('backend:cudaMallocAsync', 'backend:cudaMallocAsync')):
+            seen = []
+            kmodel = Mock(side_effect=lambda **kw: seen.append(tts.os.environ.get('PYTORCH_CUDA_ALLOC_CONF')) or Mock())
+            env = {} if preset is None else {'PYTORCH_CUDA_ALLOC_CONF': preset}
+            modules = {'torch': Mock(), 'kokoro': types.SimpleNamespace(KModel=kmodel)}
+            with patch.dict('sys.modules', modules), patch.dict(tts.os.environ, env, clear=False), patch.object(tts, 'use_mlx', return_value=False):
+                if preset is None:
+                    tts.os.environ.pop('PYTORCH_CUDA_ALLOC_CONF', None)
+                tts.load_model()
+            self.assertEqual(seen, [expected])
+
     def test_utf8_word_mapping_and_repeated_words(self):
         tokens = [types.SimpleNamespace(text=text, start_ts=i, end_ts=i+0.5)
                   for i, text in enumerate(["Olá", "go", "go", "normalized-missing"])]

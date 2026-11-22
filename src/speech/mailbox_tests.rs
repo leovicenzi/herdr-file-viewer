@@ -65,3 +65,23 @@ fn stop_keeps_undelivered_speak_so_helper_knows_the_stop_id() {
     assert!(matches!(pending[0], SpeechCommand::Speak { id: 2, .. }));
     assert!(matches!(pending[1], SpeechCommand::Stop { id: 2 }));
 }
+
+#[cfg(unix)]
+#[test]
+fn release_reaps_the_helper_silently_and_the_next_send_starts_another() {
+    let mut speech = CommandSpeech::new(vec!["sh".into(), "-c".into(), "cat > /dev/null".into()]);
+    speech.send(speak(1)).unwrap();
+    let pid = speech.child.as_ref().unwrap().id();
+    speech.release();
+    assert!(speech.child.is_none() && speech.tx.is_none() && speech.rx.is_none());
+    // Reaped by release, so the pid is gone rather than a zombie awaiting wait().
+    if cfg!(target_os = "linux") {
+        assert!(!std::path::Path::new(&format!("/proc/{pid}")).exists());
+    }
+    assert!(
+        speech.poll().is_empty(),
+        "a released helper is not an error"
+    );
+    speech.send(speak(2)).unwrap();
+    assert!(speech.child.is_some());
+}
