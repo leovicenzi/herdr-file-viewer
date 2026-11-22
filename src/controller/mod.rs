@@ -28,6 +28,7 @@ mod git_apply;
 mod help;
 mod infile;
 mod lineselect;
+mod links;
 mod mouse;
 mod picker;
 mod pinned;
@@ -288,6 +289,15 @@ pub struct RenderResult {
 /// Produce the content-pane text for `(file, mode)`. `Send` so the render worker can run it
 /// on a worker thread (AC-23). Behind a trait so tests stub it instead of spawning glow/delta/bat.
 pub trait ContentProvider: Send {
+    /// Optional Markdown adapter retaining inert hyperlink metadata from the delegate.
+    fn markdown_links(
+        &self,
+        _path: &Path,
+        _width: Option<u16>,
+    ) -> Option<(RenderResult, Vec<crate::links::Link>)> {
+        None
+    }
+
     fn render(&self, path: &Path, mode: ViewMode, raw_diff: Option<&str>) -> RenderResult;
 
     /// Render honoring the content pane's drawable text `width` (columns), so a width-sensitive
@@ -588,6 +598,7 @@ struct RenderJob {
 }
 
 struct RenderCompletion {
+    links: Vec<crate::links::Link>,
     job: RenderJob,
     result: RenderResult,
 }
@@ -884,6 +895,8 @@ pub struct Controller {
     /// The complete applied active render, or a typed non-file display state. This is the sole
     /// source of truth for active content, content notices/source, presentation, and origin path.
     active_display: ActiveDisplay,
+    active_links: Vec<crate::links::Link>,
+    pending_link_click: Option<(usize, usize)>,
     /// A transient notice from the last action (e.g. an editor-launch failure); shown until
     /// the next intent is handled.
     action_notice: Option<String>,
@@ -1132,6 +1145,8 @@ impl Controller {
             overrides: HashMap::new(),
             changed_file_view,
             active_display: ActiveDisplay::EmptyTree(Arc::new(Text::raw(""))),
+            active_links: vec![],
+            pending_link_click: None,
             action_notice: None,
             flash: None,
             annotations: AnnotationStore::new(),
@@ -1229,21 +1244,43 @@ impl Controller {
                         } else {
                             None
                         };
-                    content.render_at_width(
-                        &job.path,
-                        job.mode,
-                        raw_diff.as_deref(),
-                        job.wrap_width,
-                        job.pane_width,
-                        job.diff_render_mode,
+                    if job.mode == ViewMode::RenderedMarkdown
+                        && let Some(result) = content.markdown_links(&job.path, job.wrap_width)
+                    {
+                        return result;
+                    }
+                    (
+                        content.render_at_width(
+                            &job.path,
+                            job.mode,
+                            raw_diff.as_deref(),
+                            job.wrap_width,
+                            job.pane_width,
+                            job.diff_render_mode,
+                        ),
+                        vec![],
                     )
                 }))
-                .unwrap_or_else(|_| RenderResult {
-                    content: Text::raw("[content unavailable: renderer error]"),
-                    notices: vec!["the renderer failed unexpectedly; showing a placeholder".into()],
-                    source: None,
+                .unwrap_or_else(|_| {
+                    (
+                        RenderResult {
+                            content: Text::raw("[content unavailable: renderer error]"),
+                            notices: vec![
+                                "the renderer failed unexpectedly; showing a placeholder".into(),
+                            ],
+                            source: None,
+                        },
+                        vec![],
+                    )
                 });
-                if result_tx.send(RenderCompletion { job, result }).is_err() {
+                if result_tx
+                    .send(RenderCompletion {
+                        job,
+                        result: result.0,
+                        links: result.1,
+                    })
+                    .is_err()
+                {
                     break; // controller gone
                 }
             }
@@ -2331,6 +2368,7 @@ impl Controller {
             Intent::CycleView => self.cycle_view(),
             Intent::OpenInEditor => self.open_in_editor(),
             Intent::OpenWithApp => self.open_with_app(),
+            Intent::NextLink => self.next_markdown_link(),
             Intent::RevealInFileManager => self.reveal_in_file_manager(),
             Intent::CopyRepoPath => self.copy_path(PathKind::Repo),
             Intent::CopyAbsPath => self.copy_path(PathKind::Absolute),
@@ -2768,6 +2806,11 @@ impl Controller {
     /// ([`Intent::OpenInEditor`]). The content was already rendered when the file was selected,
     /// so this only flips the layout/focus — no re-render is dispatched.
     fn activate(&mut self) -> Effects {
+        if self.focus == Focus::Content
+            && let Some((line, col)) = self.selected_link_position()
+        {
+            return self.follow_link_at(line, col);
+        }
         let Some(node) = self.tree.selected() else {
             return Effects::noop();
         };
@@ -3658,6 +3701,8 @@ impl Controller {
     /// the pane synchronously (no job). Every call bumps `latest_seq`, so any still-in-flight
     /// render for the previous selection is superseded and dropped by [`poll`].
     fn dispatch_render(&mut self) {
+        self.active_links.clear();
+        self.pending_link_click = None;
         self.speech.stop();
         self.latest_seq += 1;
         let seq = self.latest_seq;
@@ -3787,7 +3832,7 @@ impl Controller {
             applied |= self.confirm_finder().redraw;
         }
         while let Ok(completion) = self.result_rx.try_recv() {
-            let RenderCompletion { job, result } = completion;
+            let RenderCompletion { job, result, links } = completion;
             let seq = job.seq;
             if seq == self.latest_seq {
                 // A width-reflow re-render (a resize, not a selection change): its content replaces
@@ -3818,6 +3863,7 @@ impl Controller {
                     ))
                 };
                 self.active_display = display;
+                self.active_links = links;
                 // Covers the placeholder→land window: a selection dragged over "Rendering…" after
                 // dispatch_render's clear must not carry its stale coordinates onto the new body.
                 // (Also dropped on a reflow: an ambient selection's line/col coords are against the

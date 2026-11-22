@@ -585,6 +585,32 @@ struct LiveContent {
 }
 
 impl ContentProvider for LiveContent {
+    fn markdown_links(
+        &self,
+        path: &Path,
+        width: Option<u16>,
+    ) -> Option<(RenderResult, Vec<crate::links::Link>)> {
+        let prepared = render::classify(&self.root, path, self.caps);
+        let mut renderers = self.renderers.clone();
+        if let Some(width) = width.filter(|w| *w > 0) {
+            renderers.markdown = render::with_wrap_width(&renderers.markdown, width);
+        }
+        let (content, notice, links) = render::markdown_with_links(
+            &renderers,
+            &prepared,
+            path.file_name().and_then(OsStr::to_str),
+            self.caps,
+        );
+        Some((
+            RenderResult {
+                content,
+                notices: notice.into_iter().collect(),
+                source: None,
+            },
+            links,
+        ))
+    }
+
     fn render(&self, path: &Path, mode: ViewMode, raw_diff: Option<&str>) -> RenderResult {
         // The width-less entry point: no pane width known, so glow keeps its `-w 0` (no wrap).
         self.render_at_width(path, mode, raw_diff, None, None, DiffRenderMode::default())

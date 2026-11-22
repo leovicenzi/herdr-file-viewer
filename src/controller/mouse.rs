@@ -131,6 +131,7 @@ impl Controller {
                 // (click-to-scroll). Anything else waits for the release (a click) and drops a standing
                 // selection (click-away deselect). Always (re)set `drag` from the press — so a stale
                 // drag from a release we never saw (e.g. swallowed by a modal) can't act on later moves.
+                self.pending_link_click = None;
                 let region = self.hit_test(col, row);
                 if region == MouseRegion::Content {
                     // Seed a fresh collapsed char selection at the pressed caret; the Drag arm
@@ -146,6 +147,7 @@ impl Controller {
                         return Effects::redraw();
                     }
                     let (line, caret) = self.char_at_content_col(col, row);
+                    self.pending_link_click = Some((line, caret));
                     let last = self.active_lines().len().max(1);
                     let mut sel = PreviewSelection::new(line);
                     sel.begin_char(line, caret, last);
@@ -209,6 +211,7 @@ impl Controller {
                 // Extend the ambient selection to the dragged caret + autoscroll past a viewport edge
                 // — the L-mode drag, but on the Modal-independent `content_selection`.
                 Some(Drag::ContentSelect) => {
+                    self.pending_link_click = None;
                     let (line, caret) = self.char_at_content_col(col, row);
                     let last = self.active_lines().len().max(1);
                     if let Some(sel) = self.active_interaction.selection.as_mut() {
@@ -237,7 +240,16 @@ impl Controller {
                     if collapsed {
                         self.active_interaction.selection = None;
                         self.focus = Focus::Content;
-                        Effects::redraw()
+                        if self.hit_test(col, row) == MouseRegion::Content {
+                            let (line, caret) = self.char_at_content_col(col, row);
+                            if self.pending_link_click.take() == Some((line, caret)) {
+                                self.follow_link_at(line, caret)
+                            } else {
+                                Effects::redraw()
+                            }
+                        } else {
+                            Effects::redraw()
+                        }
                     } else {
                         self.copy_content_selection()
                     }

@@ -319,6 +319,43 @@ pub fn render(
     }
 }
 
+/// Render Markdown while retaining OSC-8 destinations as inert hit-test metadata.
+/// All terminal controls still pass through the normal neutralizer before display.
+pub(crate) fn markdown_with_links(
+    renderers: &Renderers,
+    prepared: &Prepared,
+    name: Option<&str>,
+    caps: Caps,
+) -> (Text<'static>, Option<String>, Vec<crate::links::Link>) {
+    let (input, notice) = match prepared {
+        Prepared::Full { text } => (text.as_str(), None),
+        Prepared::Truncated { text, notice } => (text.as_str(), Some(notice.clone())),
+        _ => {
+            let (text, notice) = render(
+                renderers,
+                prepared,
+                ViewMode::RenderedMarkdown,
+                None,
+                name,
+                caps,
+            );
+            return (text, notice, vec![]);
+        }
+    };
+    let command = with_name(&renderers.markdown, &sanitize_name(name.unwrap_or("")));
+    match run_renderer(&command, input, renderers.timeout) {
+        Ok(raw) => {
+            let links = crate::links::from_osc8(&raw);
+            (to_text(&raw), notice, links)
+        }
+        Err(err) => (
+            to_text(input),
+            Some(fallback_notice(err, ViewMode::RenderedMarkdown, notice)),
+            vec![],
+        ),
+    }
+}
+
 /// Return a bounded, escape-neutralized raw diff without invoking an external renderer. This is
 /// the `D` cycle's plain-text state: the diff still comes from git, but no formatter is required.
 pub fn render_raw_diff(raw_diff: Option<&str>, caps: Caps) -> (Text<'static>, Option<String>) {
@@ -654,6 +691,10 @@ enum ControlMode {
 
 /// Remove terminal-control escape sequences according to the destination's presentation needs.
 /// Operates on bytes (control sequences are ASCII) and preserves all other UTF-8 content verbatim.
+pub(crate) fn plain_content(raw: &str) -> String {
+    neutralize_terminal_control(raw, ControlMode::Plain)
+}
+
 fn neutralize_terminal_control(raw: &str, mode: ControlMode) -> String {
     let bytes = raw.as_bytes();
     let mut out: Vec<u8> = Vec::with_capacity(bytes.len());

@@ -28,6 +28,7 @@ is additive and on by default.
 | `v` | Cycle the content view mode |
 | `e` | Open the selected file in `$EDITOR` (see [Opening in an editor](#opening-in-an-editor)) |
 | `t` | **Read aloud** from the phrase at the top visible line of the active preview and enter [reading mode](#reading-mode); press again to pause/resume. Local Kokoro (MLX on Apple Silicon, PyTorch/CUDA on Linux) with word highlighting; see [setup](read-aloud.md) |
+| `o` | Select the next link in rendered Markdown (active preview); `Enter` opens it, `Esc` clears the selection |
 | `O` (Shift+`o`) | **Open with default app**: hand the selected file or directory to the OS default application (e.g. an image opens in the system viewer). Read-only hand-off; non-blocking (the viewer keeps running) |
 | `R` (Shift+`r`) | **Reveal in file manager**: open the OS file manager (Finder / Explorer / a Linux file manager) with the selected entry highlighted where supported, so you can drag it out (e.g. into Slack). Read-only hand-off |
 | `f` | **Go to file**: open a fuzzy finder over every file in the tree; type to filter, `↑` / `↓` move, `Enter` opens the selected file and focuses its active preview, `Esc` cancels (`←` / `→` scroll long paths) |
@@ -151,6 +152,7 @@ The viewer is keyboard-first; the mouse is additive and on by default:
 
 | Gesture | Action |
 | --- | --- |
+| **Click** a Markdown link in the active preview | Open the destination (web/email via the OS, local files inside the viewer); dragging still selects text |
 | **Click** a tree row | Select it (focus the tree) |
 | **Double-click** a folder | Expand / collapse it (same as `Enter`) |
 | **Double-click** a file | Open it in **zoom mode**: content full-screen (same as `Enter`); the editor is the `e` key |

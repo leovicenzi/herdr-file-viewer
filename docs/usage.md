@@ -1,5 +1,22 @@
 # Usage guide
 
+## Markdown links
+
+In rendered Markdown, **click a link label or its displayed URL** to follow it. A drag still
+selects and copies text; it does not open a link. Keyboard: press `o` to highlight the next
+link, repeat `o` to cycle, then `Enter` to open it. `Esc` clears the selection. Stop reading
+mode with `Esc` first if its media-player keys own input.
+
+`http:`, `https:`, and `mailto:` links go to your OS default application (using the configured
+`open` command, if any). Local file links open inside the viewer, relative to the Markdown
+file, with percent-encoded paths decoded. They must resolve to an existing file inside the
+viewed root, including through symlinks. Local fragments/query strings are stripped (the file
+opens at the top); heading-only links, other protocols, directories, and outside-root files
+show a notice rather than launching anything. No URL is opened automatically.
+
+This uses the **OSC-8 hyperlinks emitted by `glow`**; a custom renderer must emit these too.
+Plain-text fallback, source/diff views, and frozen pinned previews do not have clickable links.
+
 ## Reading aloud
 
 Press `t` to read the visible active preview locally with Kokoro (MLX on Apple Silicon, PyTorch/CUDA on Linux), in English, Portuguese, Spanish, French, or Italian, detected per paragraph. Reading

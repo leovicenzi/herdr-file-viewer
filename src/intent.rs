@@ -67,6 +67,8 @@ pub enum Intent {
     /// hand-off — launches another process, never modifies the file (AC-1, AC-N1). Non-blocking
     /// (does not suspend the TUI).
     OpenWithApp,
+    /// Select the next rendered Markdown link; Activate follows it.
+    NextLink,
     /// Reveal the selected entry in the OS file manager (`R`). Read-only external hand-off
     /// (AC-2, AC-N1). Non-blocking.
     RevealInFileManager,
@@ -183,7 +185,7 @@ pub enum Intent {
 impl Intent {
     /// Every intent variant — lets the dispatcher and tests enumerate the closed set so
     /// keyboard-completeness (AC-18) and the no-file/git-mutation invariant (AC-N3) stay checkable.
-    pub const ALL: [Intent; 47] = [
+    pub const ALL: [Intent; 48] = [
         Intent::NavUp,
         Intent::NavDown,
         Intent::PageUp,
@@ -202,6 +204,7 @@ impl Intent {
         Intent::CycleView,
         Intent::OpenInEditor,
         Intent::OpenWithApp,
+        Intent::NextLink,
         Intent::RevealInFileManager,
         Intent::CopyRepoPath,
         Intent::CopyAbsPath,
@@ -305,6 +308,7 @@ mod tests {
                 | Intent::CycleDiffRender
                 | Intent::CycleView
                 | Intent::OpenInEditor
+                | Intent::NextLink
                 | Intent::OpenWithApp
                 | Intent::RevealInFileManager
                 | Intent::CopyRepoPath
@@ -397,7 +401,8 @@ mod tests {
                 Some(Intent::CycleDiffRender) => Intent::CycleView,
                 Some(Intent::CycleView) => Intent::OpenInEditor,
                 Some(Intent::OpenInEditor) => Intent::OpenWithApp,
-                Some(Intent::OpenWithApp) => Intent::RevealInFileManager,
+                Some(Intent::OpenWithApp) => Intent::NextLink,
+                Some(Intent::NextLink) => Intent::RevealInFileManager,
                 Some(Intent::RevealInFileManager) => Intent::CopyRepoPath,
                 Some(Intent::CopyRepoPath) => Intent::CopyAbsPath,
                 Some(Intent::CopyAbsPath) => Intent::AddAnnotation,

@@ -340,6 +340,13 @@ pub(crate) const REGISTRY: &[Binding] = &[
         category: "Open & copy",
     },
     Binding {
+        intent: Intent::NextLink,
+        name: "next_link",
+        default_keys: &[KeyCode::Char('o')],
+        description: "Select the next Markdown link; Enter opens it.",
+        category: "Open & copy",
+    },
+    Binding {
         intent: Intent::RevealInFileManager,
         name: "reveal_in_file_manager",
         default_keys: &[KeyCode::Char('R')],
@@ -889,6 +896,7 @@ mod tests {
         (KeyCode::Char('D'), Intent::CycleDiffRender),
         (KeyCode::Char('v'), Intent::CycleView),
         (KeyCode::Char('e'), Intent::OpenInEditor),
+        (KeyCode::Char('o'), Intent::NextLink),
         (KeyCode::Char('f'), Intent::OpenFinder),
         (KeyCode::Char('s'), Intent::OpenProjectSearch),
         (KeyCode::Char(':'), Intent::OpenGoToLine),
@@ -1617,7 +1625,7 @@ mod tests {
     }
 
     #[test]
-    fn shift_o_r_map_to_open_and_reveal_and_lowercase_o_is_unbound() {
+    fn shift_o_r_map_to_open_and_reveal_and_lowercase_o_selects_links() {
         // `O` (Shift+o) opens the selected entry with the OS default app; `R` (Shift+r) reveals
         // it in the OS file manager. Lowercase `o` stays unbound (`r` is Refresh — untouched).
         // A Ctrl chord on either capital key must fire nothing.
@@ -1646,8 +1654,8 @@ mod tests {
             None,
             "Ctrl-R must not fire an intent"
         );
-        // Lowercase `o` stays unbound; `r` stays Refresh (no collision).
-        assert_eq!(map_key(k(KeyCode::Char('o'))), None);
+        // Lowercase `o` selects links; `r` stays Refresh (no collision).
+        assert_eq!(map_key(k(KeyCode::Char('o'))), Some(Intent::NextLink));
         assert_eq!(map_key(k(KeyCode::Char('r'))), Some(Intent::Refresh));
     }
 
